@@ -7,7 +7,7 @@
   const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
   const RELEASE = "https://github.com/cirmax82-beep/korea-protected-areas/releases/download/data-latest/";
   const JSZIP_URL = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
-  const DEFAULT_ON = ["wildlife", "wetland", "wetland-coast", "eco-landscape", "special-island", "park-national", "park-province", "park-county",
+  const DEFAULT_ON = ["wildlife-special", "wildlife", "wetland", "wetland-coast", "eco-landscape", "special-island", "park-national", "park-province", "park-county",
     "baekdu", "marine-mpa"];
   const VW_SOURCE = "국토교통부 브이월드(디지털트윈국토) 2D 데이터 API";
   const KDPA_SOURCE = "한국보호지역 통합DB(KDPA, kdpa.kr)";
@@ -16,7 +16,7 @@
   // 겹칠 때 위에 올 순서: 넓게 퍼진 구역은 아래, 작은 구역은 위
   const STACK = ["coast-conserve", "env-sea", "fishery", "riparian", "special-measure", "greenbelt", "natenv", "forest", "baekdu",
     "park-national", "park-province", "park-county", "kdpa-other", "landscape", "urbanpark", "water", "heritage", "natural-heritage", "scenic",
-    "protect-district", "air", "temple", "eco-landscape", "special-island", "marine-mpa", "wetland-coast", "wetland", "wildlife"];
+    "protect-district", "air", "temple", "eco-landscape", "special-island", "marine-mpa", "wetland-coast", "wetland", "wildlife", "wildlife-special"];
   const FIELDS = [["구역id", "AREA_ID"], ["이름", "NAME"], ["종류", "TYPE"], ["세부구분", "SUBTYPE"], ["시도", "SIDO"], ["시군구", "SIGUNGU"],
     ["고시", "NOTICE"], ["비고", "REMARK"], ["면적_ha", "AREA_HA"], ["근거법령", "LAW"], ["출처", "SOURCE"]];
 

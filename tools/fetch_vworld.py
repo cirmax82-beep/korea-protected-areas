@@ -89,7 +89,7 @@ def main():
     summary_path = OUT / "summary.json"   # 일부 레이어만 받을 때는 나머지 기록을 남겨 둠
     summary = json.loads(summary_path.read_text(encoding="utf-8")) if only and summary_path.exists() else {}
     for layer in LAYERS + [ADMIN]:   # 행정경계는 생태·자연도 구역의 소재지를 붙일 때 씀
-        if (only and layer["id"] not in only) or not layer.get("data"):   # data가 없으면 KDPA만 쓰는 종류
+        if (only and layer["id"] not in only) or not layer.get("data") or layer.get("raw"):   # data가 없으면 KDPA만, raw면 다른 레이어 자료를 같이 씀
             continue
         t = time.time()
         feats = fetch_box(key, domain, layer["data"], KOREA, attr=layer.get("filter"))

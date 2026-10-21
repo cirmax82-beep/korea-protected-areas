@@ -120,6 +120,10 @@ def heritage_hint(alias, remark):
 
 def prepare(layer, gdf):
     """레이어마다 다른 속성을 공통 이름(name·uname·sido_name·sigg_name·notice·remark)으로 맞춤"""
+    if layer["id"] in ("wildlife", "wildlife-special") and "uname" in gdf.columns:   # 옛 이름(야생동·식물) → 지금 법률 용어(야생생물)
+        gdf["uname"] = gdf["uname"].map(lambda u: {"야생동·식물보호구역": "야생생물보호구역", "시·도야생동·식물보호구역": "시·도 야생생물보호구역",
+                                                   "야생동·식물특별보호구역": "야생생물특별보호구역",
+                                                   "야생동·식물보호구역미분류": "야생생물보호구역(미분류)"}.get(clean(u), u))
     if layer["id"] == "marine-mpa":
         # 예: mpa_nam '보령소황사구해역 해양보호구역(경관)', gos_num '해양수산부고시제2018-135호', gos_dat '20181130', loc '충청남도 보령시 …'
         gdf["name"] = gdf["mpa_nam"].map(clean)
@@ -255,8 +259,11 @@ GENERIC_WORDS = re.compile(
 NAME_END = re.compile(r"(보호구역|보전지역|보호지역|보전해역|공원|구역|지역|해역|도서|천연기념물|명승|휴양림|수목원|학술림|홍수터)$")
 
 
+SIDO_WORDS = re.compile("|".join(sorted({*SHORT_SIDO, *SHORT_SIDO.values(), *SIDO_NOW}, key=len, reverse=True)))
+
+
 def core_name(name):
-    return GENERIC_WORDS.sub("", re.sub(r"\(.*?\)", "", str(name or "")).replace(" ", ""))
+    return SIDO_WORDS.sub("", GENERIC_WORDS.sub("", re.sub(r"\(.*?\)", "", str(name or "")).replace(" ", "")))
 
 
 def kdpa_name(r, desig, label):
@@ -301,7 +308,7 @@ def kdpa_groups(layer, kd, vw_geoms, vw_names=()):
             detail[:80],
             "관리 " + next((ko for en, ko in KDPA_AUTH if clean(r.get("MANG_AUTH")).lower().startswith(en.lower())), clean(r.get("MANG_AUTH")))
             if clean(r.get("MANG_AUTH")) else "",
-            "새로 지정되어 브이월드에 아직 없는 구역(KDPA 경계)" if pick else "브이월드에 없어 KDPA로 보충 — 현행 여부 확인" if vw_geoms else "",
+            "새로 지정되어 브이월드에 아직 없는 구역(KDPA 경계)" if pick and not layer.get("kdpa") else "브이월드에 없어 KDPA로 보충 — 현행 여부 확인" if vw_geoms else "",
             "여러 시도에 걸침" if len(codes) > 1 else "",
             "자연공존지역(OECM)" if r.get("SITE_TYPE") == "oecm" else "",
             f"KDPA {r.get('version', '')} · WDPA {r['WDPAID']}",
@@ -467,11 +474,12 @@ def main():
     ez, ez_meta = load_ecozone()
     admin = load_admin()
     layers_out, areas_out, gpkg_frames = [], [], []
+    done_geoms = {}   # 레이어 id → 만든 구역 도형(carve_by에서 씀)
     for li, layer in enumerate(LAYERS):
         # 1) 생태·자연도 별도관리지역
         eco = ecozone_groups(layer, ez, ez_meta, admin)
         # 2) 브이월드 — 생태·자연도가 있는 종류는 생태·자연도에 없는 부분만
-        src = RAW / f"{layer['id']}.geojson"
+        src = RAW / f"{layer.get('raw', layer['id'])}.geojson"
         groups, n_parts, vdrop = [], 0, 0
         if layer.get("data") and src.exists():
             gdf = gpd.read_file(src, engine="pyogrio")
@@ -479,9 +487,16 @@ def main():
                 n_parts = len(gdf)
                 groups = group_areas(layer, gdf.set_crs(4326, allow_override=True))
                 groups, vdrop = vworld_rest(groups, eco)
-        # 3) KDPA — 생태·자연도·브이월드 모두에 없는 종류에만(layers.py의 kdpa)
+        # carve_by 레이어(예: 야생생물특별보호구역)가 차지한 자리는 이 레이어에서 잘라 냄
+        cut = [(None, g, None, None) for lid in layer.get("carve_by", []) for g in done_geoms.get(lid, [])]
+        if cut:
+            keep = lambda before, after: [(k, g, r, next(e0 for k0, _, _, e0 in before if k0 == k)) for k, g, r, _ in after]  # noqa: E731
+            eco = keep(eco, vworld_rest(eco, cut)[0])   # 잘라 낸 뒤에도 이름 꼬리표(일부)는 붙이지 않음
+            groups = keep(groups, vworld_rest(groups, cut)[0])
+        # 3) KDPA — 위 두 자료에 없는 구역(같은 종류도 보충)
         known = [(g, extra.get("name") or area_name(layer, key, remarks)) for key, g, remarks, extra in eco + groups if not g.is_empty]
-        kgroups, kdup = kdpa_groups(layer, kd, [g for g, _ in known], [n for _, n in known]) if layer.get("kdpa_pick") else kdpa_groups(layer, kd, [], [])
+        known += [(g, "") for _, g, _, _ in cut]   # 잘라 낸 자리(다른 레이어)에 겹치는 KDPA 구역도 넣지 않음
+        kgroups, kdup = kdpa_groups(layer, kd, [g for g, _ in known], [n for _, n in known])
         if not eco and not groups and not kgroups:
             print(f"  {layer['name']}: 자료 없음 — 건너뜀")
             continue
@@ -520,6 +535,7 @@ def main():
             if simple:
                 map_feats.append({"type": "Feature", "properties": {"i": idx}, "geometry": simple})
             rows.append({**props, "geometry": geom})
+        done_geoms[layer["id"]] = [r["geometry"] for r in rows]
         (DATA / "map" / f"{layer['id']}.json").write_text(json.dumps({"type": "FeatureCollection", "features": map_feats},
                                                                       separators=(",", ":")), encoding="utf-8")
         # 종류별 전체 파일(릴리스용): SHP는 필드 이름 10자 제한이라 영문 약어로
