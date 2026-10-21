@@ -1,0 +1,5 @@
+# 로컬 개발 설정과 받은 원본(용량이 큼)
+.claude/
+__pycache__/
+*.pyc
+work/

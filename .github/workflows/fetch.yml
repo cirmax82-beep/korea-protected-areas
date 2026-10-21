@@ -1,0 +1,34 @@
+# 브이월드에서 보호구역 경계를 받아 결과를 작업 산출물(artifact)로 올립니다(수동 실행).
+# 인증키는 저장소 비밀값 VWORLD_KEY에서 읽습니다.
+name: 경계 받기(시험)
+
+on:
+  workflow_dispatch:
+    inputs:
+      layers:
+        description: "받을 레이어 id(빈칸이면 전체, 여러 개는 띄어쓰기)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: 브이월드 경계 받기
+        env:
+          VWORLD_KEY: ${{ secrets.VWORLD_KEY }}
+        run: python tools/fetch_vworld.py ${{ github.event.inputs.layers }}
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: raw
+          path: work/raw/
+          retention-days: 7
