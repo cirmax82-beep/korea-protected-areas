@@ -433,24 +433,78 @@
     if (sel) sel.onchange = () => { A.raw.dxf.pick = sel.value; buildFromRaw(); };
   };
 
-  // 주소·장소 찾기(오픈스트리트맵 Nominatim — 버튼을 누를 때만 한 번씩 보냄)
+  // 주소·장소 찾기 — 국토교통부 브이월드 검색(도로명·지번·장소)을 먼저 쓰고, 못 찾으면 오픈스트리트맵 Nominatim
+  // 브이월드 인증키는 배포할 때 저장소 비밀값(VWORLD_KEY)에서 js/config.js로 넣음. 버튼을 누를 때만 보냄
+  const VW_KEY = (window.PORTAL_CONFIG || {}).vworldKey || "";
+  const VW_DOMAIN = "https://protect.biogrideia.com";   // 인증키에 등록한 서비스 주소
+  // 브이월드는 CORS를 열어 두지 않아 JSONP(callback)로 받음
+  let jsonpSeq = 0;
+  const jsonp = (url, ms = 8000) => new Promise((resolve, reject) => {
+    const cb = `__vw${++jsonpSeq}_${Date.now().toString(36)}`;
+    const s = document.createElement("script");
+    const t = setTimeout(() => done(new Error("검색 서버가 응답하지 않습니다.")), ms);
+    function done(err, data) {
+      clearTimeout(t);
+      window[cb] = () => {};   // 늦게 온 응답은 버림
+      s.remove();
+      if (err) reject(err); else resolve(data);
+    }
+    window[cb] = (data) => done(null, data);
+    s.onerror = () => done(new Error("검색 서버에 연결하지 못했습니다."));
+    s.src = `${url}&callback=${cb}`;
+    document.head.appendChild(s);
+  });
+  const vworld = async (q, type, category) => {
+    const p = new URLSearchParams({ service: "search", request: "search", version: "2.0", crs: "EPSG:4326", size: "10", page: "1",
+      query: q, type, format: "json", errorformat: "json", key: VW_KEY, domain: VW_DOMAIN });
+    if (category) p.set("category", category);
+    const d = (await jsonp(`https://api.vworld.kr/req/search?${p}`)).response || {};
+    if (d.status === "ERROR") throw new Error((d.error && d.error.text) || "브이월드 검색 오류");
+    return ((d.result && d.result.items) || []).map((it) => {
+      const a = it.address || {};
+      if (type === "place") return { name: it.title || "", sub: a.road || a.parcel || "", lon: +it.point.x, lat: +it.point.y, kind: "장소" };
+      if (category === "road") return { name: a.road || "", sub: a.parcel ? `지번 ${a.parcel}` : "", lon: +it.point.x, lat: +it.point.y, kind: "도로명" };
+      return { name: a.parcel || "", sub: a.road ? `도로명 ${a.road}` : "", lon: +it.point.x, lat: +it.point.y, kind: "지번" };
+    });
+  };
+  const nominatim = async (q) => {
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=kr&accept-language=ko&limit=8&q=${encodeURIComponent(q)}`);
+    if (!res.ok) throw new Error(res.status);
+    // 도로명 주소를 찾으면 그 도로가 아닌 엉뚱한 곳을 돌려줄 때가 많아 걸러 냄
+    const road = (/([가-힣A-Za-z0-9]+(?:로|길))\s*\d+(?:-\d+)?\s*$/.exec(q) || [])[1];
+    return (await res.json()).filter((x) => !road || x.display_name.replace(/\s/g, "").includes(road))
+      .map((x) => ({ name: x.name || x.display_name.split(",")[0], sub: x.display_name, lon: +x.lon, lat: +x.lat, kind: "OSM" }));
+  };
   let addrList = [];
   const searchAddr = async (q) => {
     const box = $("#an-addr-res");
     box.hidden = false;
     box.innerHTML = `<p class="muted small pad">찾는 중…</p>`;
-    try {
-      const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=kr&accept-language=ko&limit=8&q=${encodeURIComponent(q)}`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(res.status);
-      addrList = await res.json();
-    } catch (err) {
-      console.warn(err);
-      box.innerHTML = `<p class="muted small pad">주소 검색 서버에 연결하지 못했습니다. 잠시 뒤 다시 하거나 지도에 점을 찍으세요.</p>`;
-      return;
+    q = q.replace(/(로|길)(\d+(?:-\d+)?)\s*$/, "$1 $2");   // ‘남부10길3’ → ‘남부10길 3’
+    let list = [], failed = false;
+    if (VW_KEY) {
+      try {
+        const [road, parcel] = await Promise.all([vworld(q, "address", "road"), vworld(q, "address", "parcel")]);
+        list = [...road, ...parcel];
+        if (list.length < 3) list.push(...(await vworld(q, "place")));
+      } catch (err) {
+        console.warn(err);
+        failed = true;
+      }
     }
-    box.innerHTML = addrList.length ? addrList.map((x, i) => `<button data-i="${i}">${esc(x.name || x.display_name.split(",")[0])}<small>${esc(x.display_name)}</small></button>`).join("")
-      : `<p class="muted small pad">찾지 못했습니다. 도로명 주소(예: 김해시 가야로 45)나 장소 이름으로 다시 찾거나, ‘지도에 그리기’에서 점을 찍으세요.</p>`;
+    if (!list.length) {
+      try { list = await nominatim(q); failed = false; } catch (err) { console.warn(err); failed = true; }
+    }
+    const seen = new Set();
+    addrList = list.filter((x) => x.name && Number.isFinite(x.lon) && Number.isFinite(x.lat)).filter((x) => {
+      const k = `${x.name}|${x.sub}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    }).slice(0, 12);
+    box.innerHTML = addrList.length ? addrList.map((x, i) => `<button data-i="${i}">${esc(x.name)} <span class="kind">${esc(x.kind)}</span>${x.sub ? `<small>${esc(x.sub)}</small>` : ""}</button>`).join("")
+      : `<p class="muted small pad">${failed ? "주소 검색 서버에 연결하지 못했습니다. 잠시 뒤 다시 하거나 ‘지도에 그리기’에서 점을 찍으세요."
+        : "찾지 못했습니다. 시·군 이름을 붙이거나(예: 양산시 남부10길 3) 지번 주소·장소 이름으로 다시 찾거나, ‘지도에 그리기’에서 점을 찍으세요."}</p>`;
   };
 
   // 좌표 글 읽기 — 한 줄에 한 점. 숫자 둘(또는 번호 + 둘), 한 줄에 여러 쌍도 됨. 도·분·초는 십진수로 바꿈
@@ -1226,6 +1280,7 @@
 
   // ---------- 화면 ----------
   const bindUI = () => {
+    if (!VW_KEY) $("#an-addr-note").textContent = "오픈스트리트맵(Nominatim)으로 찾으며 검색어가 그 서버로 갑니다. 한국 주소는 못 찾는 경우가 많으니 장소 이름으로 찾거나 ‘지도에 그리기’에서 점을 찍으세요.";
     const crsOpts = (list) => list.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
     $("#an-crs").innerHTML = crsOpts(CRS);
     $("#an-file-crs").innerHTML = crsOpts(CRS.filter((c) => c.def));
@@ -1252,8 +1307,8 @@
       const b = e.target.closest("[data-i]");
       if (!b) return;
       const x = addrList[Number(b.dataset.i)];
-      if (!$("#an-name").value.trim()) $("#an-name").value = (x.name || $("#an-addr").value.trim()).slice(0, 40);
-      setSite([feat({ type: "Point", coordinates: [+x.lon, +x.lat] })], `주소 검색: ${x.display_name}`);
+      if (!$("#an-name").value.trim()) $("#an-name").value = x.name.slice(0, 40);
+      setSite([feat({ type: "Point", coordinates: [x.lon, x.lat] })], `주소 검색(${x.kind}): ${x.name}${x.sub ? ` · ${x.sub}` : ""}`);
       $("#an-addr-res").hidden = true;
     });
     $("#an-coord-go").onclick = useCoords;

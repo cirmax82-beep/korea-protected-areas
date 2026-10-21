@@ -3,3 +3,5 @@
 __pycache__/
 *.pyc
 work/
+# 배포할 때 저장소 비밀값으로 만드는 설정(브이월드 인증키)
+js/config.js

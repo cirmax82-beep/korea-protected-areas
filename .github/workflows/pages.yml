@@ -32,6 +32,20 @@ jobs:
           [ -f CNAME ] && cp CNAME _site/ || true
           cp naver*.html google*.html _site/ 2>/dev/null || true   # 검색 등록 소유 확인 파일
           ls _site
+      # 사업지 분석의 주소 검색(브이월드 검색 API)용. 브라우저에서 쓰는 키라 배포된 사이트에서는 보이며,
+      # 브이월드에 등록한 서비스 주소(protect.biogrideia.com)에서만 쓰도록 되어 있음
+      - name: 주소 검색용 설정 만들기
+        env:
+          VWORLD_KEY: ${{ secrets.VWORLD_KEY }}
+        run: |
+          KEY=$(printf '%s' "$VWORLD_KEY" | tr -d '[:space:]')
+          if printf '%s' "$KEY" | grep -Eq '^[A-Za-z0-9-]{20,64}$'; then
+            printf 'window.PORTAL_CONFIG = { vworldKey: "%s" };\n' "$KEY" > _site/js/config.js
+            echo "브이월드 키를 넣었습니다."
+          else
+            echo 'window.PORTAL_CONFIG = {};' > _site/js/config.js
+            echo "::warning::VWORLD_KEY 비밀값이 없거나 형식이 달라 주소 검색은 오픈스트리트맵만 씁니다."
+          fi
       - uses: actions/upload-pages-artifact@v5
         with:
           path: _site

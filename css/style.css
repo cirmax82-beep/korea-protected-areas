@@ -70,6 +70,7 @@ h3 { margin: 0 0 10px; font-size: 15px; }
 .search-results button { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--border); background: var(--surface); color: var(--text); padding: 7px 10px; cursor: pointer; font: inherit; }
 .search-results button:hover { background: var(--row-hover); }
 .search-results small { display: block; color: var(--muted); }
+.search-results .kind { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; margin-left: 4px; white-space: nowrap; }
 .layer-list { padding: 4px 8px; }
 .layer-group-title { font-size: 12px; font-weight: 700; color: var(--text-2); margin: 10px 4px 4px; }
 .layer-item { display: grid; grid-template-columns: auto auto 1fr auto; align-items: center; gap: 8px; padding: 6px 4px; border-radius: 6px; cursor: pointer; }

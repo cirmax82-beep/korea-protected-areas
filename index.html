@@ -62,11 +62,11 @@
           </div>
           <div class="an-pane" data-pane="addr">
             <form id="an-addr-form" class="row">
-              <input id="an-addr" class="input grow" type="search" placeholder="도로명 주소나 장소 이름" autocomplete="off" />
+              <input id="an-addr" class="input grow" type="search" placeholder="도로명·지번 주소나 장소 이름" autocomplete="off" />
               <button class="btn btn-primary">찾기</button>
             </form>
             <div id="an-addr-res" class="search-results" hidden></div>
-            <p class="muted small">오픈스트리트맵(Nominatim)으로 찾으며 검색어가 그 서버로 갑니다. 지번 주소는 잘 안 찾아지니 도로명 주소·장소 이름으로 찾거나, ‘지도에 그리기’에서 점을 찍으세요.</p>
+            <p class="muted small" id="an-addr-note">도로명·지번 주소나 장소 이름으로 찾습니다(국토교통부 브이월드 검색, 못 찾으면 오픈스트리트맵). 검색어는 그 서버로 갑니다. 그래도 안 나오면 ‘지도에 그리기’에서 점을 찍으세요.</p>
           </div>
           <div class="an-pane" data-pane="coord" hidden>
             <textarea id="an-coord" class="input wide" rows="5" spellcheck="false" placeholder="한 줄에 한 점씩&#10;35.2386, 128.9654&#10;(TM 좌표는 X, Y — 앞에 점 번호가 있어도 됩니다)"></textarea>
@@ -190,7 +190,7 @@
             <li>경계: <a href="https://www.vworld.kr" target="_blank" rel="noopener">국토교통부 브이월드(디지털트윈국토)</a> 2D 데이터 API — 토지이용규제(용도지역지구) 레이어와 자연공원·연안 레이어.</li>
             <li>브이월드 저작권정책에 따라 국토교통부 저작물은 출처를 밝히면 자유롭게 이용할 수 있습니다(공공누리 제1유형 방식). 내려받은 자료를 쓸 때는 “출처: 국토교통부 브이월드(디지털트윈국토)”를 적어 주세요.</li>
             <li>구역 이름은 원자료의 공원 이름·습지 이름·문화재 이름 또는 시도·시군구·세부 구분으로 만든 것이며, 같은 고시(연도·번호)의 조각을 하나의 구역으로 묶었습니다.</li>
-            <li>‘사업지 분석’은 브라우저 안에서 계산하며 올린 파일은 어디에도 보내지 않습니다. 주소 검색만 오픈스트리트맵(Nominatim)에 검색어를 보냅니다.</li>
+            <li>‘사업지 분석’은 브라우저 안에서 계산하며 올린 파일은 어디에도 보내지 않습니다. 주소 검색만 국토교통부 브이월드 검색(못 찾으면 오픈스트리트맵 Nominatim)에 검색어를 보냅니다.</li>
           </ul>
         </div>
         <div class="panel">
@@ -211,6 +211,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
   <script src="js/shpwrite.js"></script>
   <script src="js/app.js"></script>
+  <script src="js/config.js"></script>
   <script src="js/analyze.js"></script>
 </body>
 </html>
