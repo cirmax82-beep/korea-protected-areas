@@ -973,15 +973,18 @@
     });
   };
 
+  // 거리 구간은 겹치지 않게 나눔: 겹침·포함(0 m) / 0.5 km 이내 / 0.5~1 km / … / 반경까지 — 다 더하면 구역 수
   const summary = (r) => {
-    const bands = BANDS.filter((b) => b < r.km);
+    const edges = [0, ...BANDS.filter((b) => b < r.km), r.km];
+    const bands = edges.slice(1).map((hi, i) => ({ lo: edges[i], hi, label: i ? `${fmt(edges[i], 1)}~${fmt(hi, 1)} km` : `${fmt(hi, 1)} km 이내` }));
     const by = new Map();
     r.rows.forEach((x) => { if (!by.has(x.l.id)) by.set(x.l.id, []); by.get(x.l.id).push(x); });
     const layers = S.layers.filter((l) => r.types.includes(l.id));
     return { bands, rows: layers.map((l) => {
       const list = (by.get(l.id) || []).slice().sort((a, b) => a.dist - b.dist);
       const near = list.find((x) => x.dist > 0);
-      return { l, n: list.length, hit: list.filter((x) => x.dist === 0).length, bands: bands.map((b) => list.filter((x) => x.dist <= b * 1000).length),
+      return { l, n: list.length, hit: list.filter((x) => x.dist === 0).length,
+        bands: bands.map((b) => list.filter((x) => x.dist > b.lo * 1000 && x.dist <= b.hi * 1000).length),
         first: list[0], near };
     }) };
   };
@@ -1042,7 +1045,7 @@
       </div>
       <h3>종류별 요약</h3>
       <div class="table-wrap"><table class="table an-sum">
-        <thead><tr><th>종류</th><th class="num">구역</th><th class="num">겹침·포함</th>${sm.bands.map((b) => `<th class="num">${fmt(b, 1)} km 이내</th>`).join("")}<th class="num">최단 이격거리</th><th>가장 가까운 떨어진 구역</th></tr></thead>
+        <thead><tr><th>종류</th><th class="num">구역</th><th class="num">겹침·포함</th>${sm.bands.map((b) => `<th class="num">${b.label}</th>`).join("")}<th class="num">최단 이격거리</th><th>가장 가까운 떨어진 구역</th></tr></thead>
         <tbody>${sm.rows.filter((s) => s.n).map((s) => `<tr>
           <td>${P.typeBadge(s.l)}</td><td class="num">${s.n ? fmt(s.n) : "없음"}</td><td class="num">${s.hit ? `<b class="hit">${fmt(s.hit)}</b>` : s.n ? "0" : ""}</td>
           ${s.bands.map((b) => `<td class="num">${s.n ? fmt(b) : ""}</td>`).join("")}
@@ -1124,7 +1127,7 @@
   };
   const summaryCsv = (r) => {
     const sm = summary(r);
-    const head = ["종류", "구역_수", "겹침·포함", ...sm.bands.map((b) => `${b}km_이내`), "최단_이격거리_m", "가장_가까운_떨어진_구역", "그_거리_m", "근거법령"];
+    const head = ["종류", "구역_수", "겹침·포함", ...sm.bands.map((b) => b.label.replace(/ /g, "_")), "최단_이격거리_m", "가장_가까운_떨어진_구역", "그_거리_m", "근거법령"];
     return toCsv([head, ...sm.rows.map((s) => [s.l.name, s.n, s.hit, ...s.bands, s.first ? Math.round(s.first.dist) : "", s.near ? s.near.a.name : "",
       s.near ? Math.round(s.near.dist) : "", s.l.law])]);
   };
