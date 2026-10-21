@@ -28,12 +28,14 @@ SIZE = 1000
 OUT = ROOT / "work" / "raw"
 
 
-def call(key, domain, data, box, page):
+def call(key, domain, data, box, page, attr=None):
     params = {
         "service": "data", "version": "2.0", "request": "GetFeature", "key": key, "domain": domain,
         "format": "json", "errorFormat": "json", "size": SIZE, "page": page, "data": data,
         "geomFilter": "BOX({},{},{},{})".format(*box), "geometry": "true", "attribute": "true", "crs": "EPSG:4326",
     }
+    if attr:   # 예: uname:=:수산자원보호구역
+        params["attrFilter"] = attr
     url = f"{API}?{urllib.parse.urlencode(params)}"
     for attempt in range(6):
         try:
@@ -45,9 +47,9 @@ def call(key, domain, data, box, page):
             time.sleep(3 * (attempt + 1))
 
 
-def fetch_box(key, domain, data, box, depth=0):
+def fetch_box(key, domain, data, box, depth=0, attr=None):
     """상자 하나의 모든 페이지. 거절(범위 초과 등)되면 4등분."""
-    first = call(key, domain, data, box, 1)
+    first = call(key, domain, data, box, 1, attr)
     status = first.get("status")
     if status == "NOT_FOUND":
         return []
@@ -61,12 +63,12 @@ def fetch_box(key, domain, data, box, depth=0):
         print(f"    {data} 상자 나눔({code}) 깊이 {depth + 1}", flush=True)
         out = []
         for b in ((x0, y0, mx, my), (mx, y0, x1, my), (x0, my, mx, y1), (mx, my, x1, y1)):
-            out += fetch_box(key, domain, data, b, depth + 1)
+            out += fetch_box(key, domain, data, b, depth + 1, attr)
         return out
     feats = list(first["result"]["featureCollection"]["features"])
     pages = int(first["page"]["total"])
     for p in range(2, pages + 1):
-        r = call(key, domain, data, box, p)
+        r = call(key, domain, data, box, p, attr)
         if r.get("status") == "OK":
             feats += r["result"]["featureCollection"]["features"]
         time.sleep(0.2)
@@ -84,12 +86,13 @@ def main():
     domain = os.environ.get("VWORLD_DOMAIN", "https://protect.biogrideia.com")
     only = set(sys.argv[1:])
     OUT.mkdir(parents=True, exist_ok=True)
-    summary = {}
+    summary_path = OUT / "summary.json"   # 일부 레이어만 받을 때는 나머지 기록을 남겨 둠
+    summary = json.loads(summary_path.read_text(encoding="utf-8")) if only and summary_path.exists() else {}
     for layer in LAYERS:
-        if only and layer["id"] not in only:
+        if (only and layer["id"] not in only) or not layer.get("data"):   # data가 없으면 KDPA만 쓰는 종류
             continue
         t = time.time()
-        feats = fetch_box(key, domain, layer["data"], KOREA)
+        feats = fetch_box(key, domain, layer["data"], KOREA, attr=layer.get("filter"))
         uniq = {}
         for f in feats:   # 상자를 나눠 받으면 경계에 걸친 도형이 겹쳐 들어오므로 id로 한 번만
             uniq[f.get("id") or json.dumps(f["properties"], sort_keys=True, ensure_ascii=False)] = f
@@ -101,7 +104,7 @@ def main():
                                 "mb": round(path.stat().st_size / 1e6, 2), "properties": keys,
                                 "sample": (feats[0].get("properties") if feats else None)}
         print(f"  {layer['name']}({layer['data']}): {len(feats):,}개 · {summary[layer['id']]['mb']} MB · {time.time() - t:.0f}초", flush=True)
-    (OUT / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
+    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
 if __name__ == "__main__":

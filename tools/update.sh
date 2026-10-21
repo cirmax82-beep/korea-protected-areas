@@ -5,6 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 export PYTHONIOENCODING=utf-8
 python tools/fetch_vworld.py
+python tools/fetch_kdpa.py   # 브이월드에 없는 종류·구역을 채울 한국보호지역 통합DB
 python tools/build.py
 git add data
 if git diff --cached --quiet; then
