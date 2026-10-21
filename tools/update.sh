@@ -16,5 +16,5 @@ else
 fi
 gh release view data-latest >/dev/null 2>&1 || gh release create data-latest --title "보호구역 경계 자료(최신)" --notes "종류별 SHP·GeoJSON(zip)과 전체 GeoPackage. 출처: 국토교통부 브이월드(디지털트윈국토)."
 gh release upload data-latest work/release/* --clobber
-gh release edit data-latest --notes "종류별 SHP·GeoJSON(zip)과 전체 GeoPackage. 출처: 국토교통부 브이월드(디지털트윈국토). 갱신: $(date +%Y-%m-%d)"
+gh release edit data-latest --notes "종류별 SHP·GeoJSON(zip)과 전체 GeoPackage. 출처: 국토교통부 브이월드(디지털트윈국토)를 먼저 쓰고, 브이월드에 없는 종류·구역은 한국보호지역 통합DB(KDPA)로 채움(구역마다 SOURCE 속성). 갱신: $(date +%Y-%m-%d)"
 echo "갱신 끝"

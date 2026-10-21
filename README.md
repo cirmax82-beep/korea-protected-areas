@@ -52,7 +52,7 @@
 브이월드는 해외 IP 접속을 막아 GitHub 서버에서는 받을 수 없습니다. 국내 컴퓨터에서 갱신합니다.
 
 1. 처음 한 번: `인증키 저장.bat`을 더블클릭해 브이월드 인증키(서비스 URL `https://protect.biogrideia.com`)를 `work/vworld_key.txt`에 저장합니다. 이 파일은 저장소에 올라가지 않습니다.
-2. 갱신: Git Bash에서 실행합니다(받기 → 가공 → 올리기 → 릴리스 파일 교체).
+2. 갱신: `갱신.bat`을 더블클릭하거나 Git Bash에서 아래를 실행합니다(브이월드·KDPA 받기 → 가공 → 올리기 → 릴리스 파일 교체, 20~30분).
 
 ```bash
 bash tools/update.sh
