@@ -1,0 +1,18 @@
+# 진단용: GitHub 서버에서 브이월드에 접속되는지(인증키 없이) 확인
+name: 브이월드 접속 확인
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 키 없이 접속
+        run: |
+          curl -sS --max-time 30 -o - -w "\nHTTP %{http_code}\n" "https://api.vworld.kr/req/data?service=data&request=GetFeature&data=LT_C_UQ114&format=json&geomFilter=BOX(127,37,127.01,37.01)" || echo "접속 실패(종료 코드 $?)"
+          curl -sS --max-time 30 -o /dev/null -w "www.vworld.kr HTTP %{http_code}\n" "https://www.vworld.kr/" || echo "www 접속 실패(종료 코드 $?)"
+          curl -sS --max-time 10 https://ipinfo.io/country || true
