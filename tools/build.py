@@ -52,6 +52,8 @@ def rnd(coords, nd):
 
 
 def geojson_geom(geom, nd):
+    if geom is None or geom.is_empty:
+        return None
     m = mapping(geom)
     if m["type"] == "Polygon":
         m = {"type": "MultiPolygon", "coordinates": [m["coordinates"]]}
@@ -183,7 +185,8 @@ def main():
                 "고시": notice_text(key.get("dyear"), key.get("dnum")), "비고": "; ".join(remarks)[:200],
                 "면적_ha": area_ha, "근거법령": layer["law"], "출처": SOURCE,
             }
-            full = geojson_geom(geom, 6)
+            # 소수점 6자리(약 10cm) 격자에 맞추면서 꼬임 없이 유효한 도형으로(반올림만 하면 드물게 꼬임)
+            full = geojson_geom(shapely.set_precision(geom, 1e-6), 6) or geojson_geom(geom, 6)
             if not full:
                 continue
             (area_dir / f"{aid}.json").write_text(json.dumps({"type": "FeatureCollection", "features": [
@@ -191,7 +194,9 @@ def main():
             idx = len(areas_out)
             areas_out.append([aid, li, name, key.get("uname", ""), key.get("sido_name", ""), key.get("sigg_name", ""),
                               notice_text(key.get("dyear"), key.get("dnum")), area_ha, [minx, miny, maxx, maxy], props["비고"]])
-            simple = geojson_geom(geom.simplify(tol, preserve_topology=True), 5)
+            # 줄인 경계는 조각끼리 겹치거나 꼬일 수 있어 1m 격자에 맞춰 바로잡음(지도에서 빈 삼각형처럼 보이는 것 방지)
+            simple = (geojson_geom(shapely.set_precision(geom.simplify(tol, preserve_topology=True), 1e-5), 5)
+                      or geojson_geom(shapely.set_precision(geom, 1e-6), 6))   # 아주 작은 구역은 줄이면 사라지므로 원본으로
             if simple:
                 map_feats.append({"type": "Feature", "properties": {"i": idx}, "geometry": simple})
             rows.append({**props, "geometry": geom})

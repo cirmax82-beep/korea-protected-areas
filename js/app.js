@@ -69,6 +69,7 @@
     L.control.scale({ imperial: false, position: "bottomright" }).addTo(map);
     map.attributionControl.addAttribution('경계: <a href="https://www.vworld.kr" target="_blank" rel="noopener">국토교통부 브이월드</a>');
     renderer = L.canvas({ padding: 0.3, tolerance: 2 });
+    map.on("moveend", debounce(() => updateDetail(), 250));
   };
 
   const popupHtml = (a) => {
@@ -91,24 +92,88 @@
 
   const visible = (a) => !S.sido || a.sido === S.sido;
 
-  const buildLayer = (l) => {
-    const color = l.color;
-    return L.geoJSON(S.geo[l.id], {
-      renderer,
-      filter: (f) => visible(S.areas[f.properties.i]),
-      style: () => ({ color, weight: 1, opacity: 0.9, fillColor: color, fillOpacity: 0.3 }),
-      onEachFeature: (f, layer) => {
-        const a = S.areas[f.properties.i];
-        S.featLayer.set(a.id, layer);
-        layer.bindTooltip(esc(a.name), { sticky: true, direction: "top" });
-        layer.on("click", (e) => L.popup({ maxWidth: 320 }).setLatLng(e.latlng).setContent(popupHtml(a)).openOn(map));
-      },
-    });
+  const styleOf = (color) => ({ color, weight: 1, opacity: 0.9, fillColor: color, fillOpacity: 0.3 });
+  const HIDDEN = { opacity: 0, fillOpacity: 0 };
+  const bindArea = (layer, a) => {
+    layer.bindTooltip(esc(a.name), { sticky: true, direction: "top" });
+    layer.on("click", (e) => L.popup({ maxWidth: 320 }).setLatLng(e.latlng).setContent(popupHtml(a)).openOn(map));
+  };
+
+  const buildLayer = (l) => L.geoJSON(S.geo[l.id], {
+    renderer,
+    filter: (f) => visible(S.areas[f.properties.i]),
+    style: () => styleOf(l.color),
+    onEachFeature: (f, layer) => {
+      const a = S.areas[f.properties.i];
+      S.featLayer.set(a.id, layer);
+      bindArea(layer, a);
+    },
+  });
+
+  // ---------- 확대하면 원본 해상도 경계로 ----------
+  // 멀리서 볼 때는 가볍게 줄인 경계(data/map)를 쓰고, DETAIL_ZOOM 이상에서는 화면에 보이는 구역만
+  // 원본 경계(data/area — 내려받는 파일과 같은 것)를 불러와 그 위에 그리고, 줄인 경계는 숨김
+  const DETAIL_ZOOM = 14;
+  const DETAIL_MAX = 400;          // 한 화면에서 원본으로 바꿀 최대 구역 수
+  const detailCache = new Map();   // 구역 id → GeoJSON(받은 것)
+  const detailShown = new Map();   // 구역 id → 지도에 올린 원본 레이어
+  let detailSeq = 0;
+
+  const hideSimple = (id, hide) => {
+    const fl = S.featLayer.get(id);
+    if (!fl) return;
+    const a = S.byId.get(id);
+    fl.setStyle(hide ? HIDDEN : styleOf(layerOf(a).color));
+    fl.options.interactive = !hide;
+  };
+  const dropDetail = (id) => {
+    const dl = detailShown.get(id);
+    if (dl) { const l = layerOf(S.byId.get(id)); l.detail && l.detail.removeLayer(dl); }
+    detailShown.delete(id);
+    hideSimple(id, false);
+  };
+  const updateDetail = async () => {
+    const seq = ++detailSeq;
+    const want = new Set();
+    if (map.getZoom() >= DETAIL_ZOOM) {
+      const b = map.getBounds();
+      const [w, so, e, n] = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()];
+      for (const a of S.areas) {
+        const l = layerOf(a);
+        if (!S.on.has(l.id) || !l.leaflet || !visible(a)) continue;
+        const [x0, y0, x1, y1] = a.bbox;
+        if (x1 < w || x0 > e || y1 < so || y0 > n) continue;
+        want.add(a.id);
+        if (want.size >= DETAIL_MAX) break;
+      }
+    }
+    [...detailShown.keys()].forEach((id) => { if (!want.has(id)) dropDetail(id); });
+    const todo = [...want].filter((id) => !detailShown.has(id));
+    for (let i = 0; i < todo.length; i += 8) {
+      await Promise.all(todo.slice(i, i + 8).map(async (id) => {
+        if (!detailCache.has(id)) {
+          try { detailCache.set(id, await (await fetch(`data/area/${encodeURIComponent(id)}.json`)).json()); } catch (_) { return; }
+        }
+      }));
+      if (seq !== detailSeq) return;   // 그사이 지도를 옮겼으면 새 요청에 맡김
+      todo.slice(i, i + 8).forEach((id) => {
+        const a = S.byId.get(id), l = layerOf(a);
+        if (!detailCache.has(id) || detailShown.has(id) || !l.detail || !S.on.has(l.id)) return;
+        const g = L.geoJSON(detailCache.get(id), { renderer, style: () => styleOf(l.color) });
+        g.eachLayer((x) => bindArea(x, a));
+        l.detail.addLayer(g);
+        detailShown.set(id, g);
+        hideSimple(id, true);
+      });
+    }
+    restack();
   };
 
   const showLayer = async (l, on) => {
     if (!on) {
       if (l.leaflet) map.removeLayer(l.leaflet);
+      if (l.detail) { map.removeLayer(l.detail); }
+      [...detailShown.keys()].forEach((id) => { if (layerOf(S.byId.get(id)) === l) dropDetail(id); });
       return;
     }
     if (!S.geo[l.id]) {
@@ -124,19 +189,27 @@
     }
     if (!S.on.has(l.id)) return;   // 받는 사이 꺼졌으면
     if (!l.leaflet) l.leaflet = buildLayer(l);
+    if (!l.detail) l.detail = L.featureGroup();
     l.leaflet.addTo(map);
+    l.detail.addTo(map);
     restack();
+    updateDetail();
   };
 
-  // 켜진 레이어를 STACK 순서대로 다시 쌓음(나중에 켠 큰 레이어가 작은 구역을 덮지 않게)
+  // 켜진 레이어를 STACK 순서대로 다시 쌓음(나중에 켠 큰 레이어가 작은 구역을 덮지 않게). 원본 경계는 제 레이어 바로 위
   const restack = () => {
     const rank = (l) => { const i = STACK.indexOf(l.id); return i < 0 ? STACK.length : i; };
-    S.layers.filter((l) => l.leaflet && map.hasLayer(l.leaflet)).sort((a, b) => rank(a) - rank(b)).forEach((l) => l.leaflet.bringToFront());
+    S.layers.filter((l) => l.leaflet && map.hasLayer(l.leaflet)).sort((a, b) => rank(a) - rank(b)).forEach((l) => {
+      l.leaflet.bringToFront();
+      if (l.detail) l.detail.bringToFront();
+    });
   };
 
   const refreshLayers = () => {
+    [...detailShown.keys()].forEach(dropDetail);
     S.layers.forEach((l) => {
       if (l.leaflet) { map.removeLayer(l.leaflet); l.leaflet = null; }
+      if (l.detail) { map.removeLayer(l.detail); l.detail = null; }
     });
     S.featLayer.clear();
     S.layers.forEach((l) => { if (S.on.has(l.id)) showLayer(l, true); });
@@ -380,6 +453,9 @@
     if (name === "map") {
       setTimeout(() => map.invalidateSize(), 30);
       if (arg && S.byId.has(arg)) setTimeout(() => focusArea(S.byId.get(arg)), 60);
+      // #map/@위도,경도,확대 — 특정 위치를 바로 여는 링크
+      const at = /^@(-?[\d.]+),(-?[\d.]+),(\d+(?:\.\d+)?)$/.exec(arg || "");
+      if (at) setTimeout(() => map.setView([+at[1], +at[2]], +at[3]), 60);
     }
     if (name === "list") renderList();
     if (name === "area") renderArea(arg);
