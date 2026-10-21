@@ -11,7 +11,9 @@
 구역 묶기
 - 공원(park_name)·연안습지(name)·해양보호구역(mpa_nam): 이름별
 - 용도지역지구 레이어: 세부 구분(uname) + 시도 + 시군구 + 고시 연도·번호별
-- KDPA(work/raw/kdpa.gpkg): 보호지역 하나가 구역 하나. 브이월드에 같은 종류가 있으면 브이월드 구역과 절반 넘게 겹치는 것은 빼고 더함
+기준 자료 순서: 생태·자연도 별도관리지역(work/raw/ecozone.gpkg) → 브이월드(생태·자연도에 없는 부분만) → KDPA(두 자료 모두에 없는 종류만)
+- 생태·자연도: 이름이 있는 종류(공원·천연기념물·습지·생태경관)는 이름별, 이름 없는 종류(산림·야생생물·수산자원·백두대간)는 시군구별
+- KDPA(work/raw/kdpa.gpkg): 보호지역 하나가 구역 하나
 구역 id는 묶는 값으로 만든 해시라 다시 만들어도 같습니다(바뀌지 않은 구역은 파일도 그대로).
 """
 import hashlib
@@ -301,9 +303,129 @@ def kdpa_groups(layer, kd, vw_geoms, vw_names=()):
         ) if x]
         key = {"kdpa": str(r["WDPAID"])}
         extra = {"name": name, "uname": label, "sido_name": sido, "sigg_name": "",
-                 "notice": f"{int(yr)}년 지정" if pd.notna(yr) and yr else "", "source": KDPA_SOURCE}
+                 "notice": f"{int(yr)}년 지정" if pd.notna(yr) and yr else "", "source": KDPA_SOURCE, "src": "k"}
         out.append((key, geom, remarks, extra))
     return out, dup
+
+
+# ---------- 생태·자연도 별도관리지역(1순위 기준) ----------
+# 이름이 적힌 종류는 이름별로, 이름 없이 ‘산림보호구역’처럼 종류만 적힌 것은 시군구별로 묶음
+ECO_NAMED = {"국립공원", "도립공원", "군립공원", "천연기념물", "습지보호", "생태경관"}
+
+
+def load_ecozone():
+    """tools/import_ecozone.py가 만든 work/raw/ecozone.gpkg → (GeoDataFrame 또는 None, 고시 정보)"""
+    src = RAW / "ecozone.gpkg"
+    if not src.exists():
+        print("  생태·자연도 자료 없음 — 브이월드부터 씀(tools/import_ecozone.py로 가져오기)")
+        return None, {}
+    meta_path = RAW / "ecozone.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
+    return gpd.read_file(src, engine="pyogrio").set_crs(4326, allow_override=True), meta
+
+
+def load_admin():
+    """시군구 경계(브이월드 LT_C_ADSIGG_INFO) — 생태·자연도 구역의 소재지를 붙일 때 씀"""
+    src = RAW / "admin-sigg.geojson"
+    if not src.exists():
+        return None
+    a = gpd.read_file(src, engine="pyogrio").set_crs(4326, allow_override=True)
+    words = a["full_nm"].fillna("").str.split(n=1)
+    a["sido_name"] = [SIDO_NOW.get(w[0], w[0]) if w else "" for w in words]
+    a["sigg_name"] = [w[1] if len(w) > 1 else "" for w in words]
+    return a[["sig_cd", "sido_name", "sigg_name", "geometry"]].reset_index(drop=True)
+
+
+def locate(geom, admin, tree):
+    """구역 안에 흩은 점이 가장 많이 든 시군구 → (시도, 시군구, 그 비율)"""
+    pts = sample_points(geom, 120)
+    if not len(pts):
+        return "", "", 0
+    counts = {}
+    for i in tree.query(geom):
+        a = admin.geometry.values[i]
+        shapely.prepare(a)
+        n = int(shapely.contains_xy(a, pts[:, 0], pts[:, 1]).sum())
+        if n:
+            counts[i] = n
+    if not counts:
+        return "", "", 0
+    i = max(counts, key=counts.get)
+    return admin.at[i, "sido_name"], admin.at[i, "sigg_name"], counts[i] / len(pts)
+
+
+def eco_name(value, label):
+    v = value.strip()
+    if v.endswith(label) and not v.endswith(" " + label):   # ‘속리산국립공원’ → ‘속리산 국립공원’
+        return v[: -len(label)].strip() + " " + label
+    return v if NAME_END.search(v.replace(" ", "")) or label == "천연기념물" else f"{v} {label}"
+
+
+def ecozone_groups(layer, ez, meta, admin):
+    """생태·자연도 별도관리지역 → group_areas와 같은 꼴"""
+    col = layer.get("ecozone")
+    if ez is None or not col:
+        return []
+    part = ez[ez[col] != ""]
+    if part.empty:
+        return []
+    label = layer["name"]
+    extra0 = {"uname": label, "source": ECO_SOURCE(meta), "src": "e", "notice": ""}
+    out = []
+    tree = shapely.STRtree(admin.geometry.values) if admin is not None else None
+    if col in ECO_NAMED:
+        for value, g in part.groupby(col):
+            geom = shapely.union_all(g.geometry.values)
+            sido, sigg, share = locate(geom, admin, tree) if tree is not None else ("", "", 0)
+            out.append(({"ez": col, "name": value}, geom, ["여러 시군구에 걸침"] if share < 0.7 else [],
+                        {**extra0, "name": eco_name(value, label), "sido_name": sido, "sigg_name": sigg if share >= 0.7 else ""}))
+        return out
+    # 이름 없는 종류: 시군구 경계로 잘라 시군구마다 한 구역
+    if admin is None:
+        geom = shapely.union_all(part.geometry.values)
+        return [({"ez": col}, geom, [], {**extra0, "name": label, "sido_name": "", "sigg_name": ""})]
+    cut = gpd.overlay(part[["geometry"]], admin, how="intersection", keep_geom_type=True)
+    for sig, g in cut.groupby("sig_cd"):
+        sido, sigg = g["sido_name"].iloc[0], g["sigg_name"].iloc[0]
+        name = " ".join(x for x in (SHORT_SIDO.get(sido, sido), sigg, label) if x)
+        out.append(({"ez": col, "sig": sig}, shapely.union_all(g.geometry.values), [],
+                    {**extra0, "name": name, "sido_name": sido, "sigg_name": sigg}))
+    return out
+
+
+def ECO_SOURCE(meta):
+    # 브이월드 공간정보 다운로드로도 제공되는 자료라 출처는 브이월드로 적음
+    return "국토교통부 브이월드(디지털트윈국토)"
+
+
+def vworld_rest(groups, eco):
+    """생태·자연도가 있는 종류: 브이월드 구역에서 생태·자연도 구역을 뺀 나머지만 남김(생태·자연도 우선).
+    두 자료 경계가 조금 어긋나 생기는 25 m 안팎의 가는 띠와 1 ha 미만 조각은 버림. 거의 다 덮이면 그 구역은 뺌."""
+    if not groups or not eco:
+        return groups, 0
+    eg = shapely.make_valid(gpd.GeoSeries([g for _, g, _, _ in eco], crs=4326).to_crs(5179).values)   # 투영하면 드물게 꼬여서 다시 고침
+    tree = shapely.STRtree(eg)
+    vg = shapely.make_valid(gpd.GeoSeries([g for _, g, _, _ in groups], crs=4326).to_crs(5179).values)
+    out, dropped = [], 0
+    for (key, g4326, remarks, extra), g in zip(groups, vg):
+        hits = tree.query(g)
+        if not len(hits):
+            out.append((key, g4326, remarks, extra))
+            continue
+        try:
+            rest = shapely.difference(g, shapely.union_all(eg[hits]))
+        except shapely.errors.GEOSException:   # 꼬임이 남아 있으면 0.1 m 격자에 맞춰 다시
+            rest = shapely.difference(shapely.set_precision(g, 0.1), shapely.union_all(shapely.set_precision(eg[hits], 0.1)))
+        rest = shapely.buffer(shapely.buffer(rest, -25), 25)
+        parts = [p for p in shapely.get_parts(rest) if p.area >= 1e4]
+        area = sum(p.area for p in parts)
+        if not parts or area < max(1e4, 0.02 * g.area):
+            dropped += 1
+            continue
+        geom = gpd.GeoSeries([shapely.union_all(parts)], crs=5179).to_crs(4326).iloc[0]
+        cut = area < 0.98 * g.area
+        out.append((key, geom, remarks, {**extra, "rest": cut}))
+    return out, dropped
 
 
 def area_name(layer, key, remarks):
@@ -337,30 +459,36 @@ def main():
     REL.mkdir(parents=True)
 
     kd = load_kdpa()
+    ez, ez_meta = load_ecozone()
+    admin = load_admin()
     layers_out, areas_out, gpkg_frames = [], [], []
     for li, layer in enumerate(LAYERS):
-        # 브이월드 먼저
+        # 1) 생태·자연도 별도관리지역
+        eco = ecozone_groups(layer, ez, ez_meta, admin)
+        # 2) 브이월드 — 생태·자연도가 있는 종류는 생태·자연도에 없는 부분만
         src = RAW / f"{layer['id']}.geojson"
-        groups, n_parts = [], 0
+        groups, n_parts, vdrop = [], 0, 0
         if layer.get("data") and src.exists():
             gdf = gpd.read_file(src, engine="pyogrio")
             if not gdf.empty:
                 n_parts = len(gdf)
                 groups = group_areas(layer, gdf.set_crs(4326, allow_override=True))
-        # 브이월드에 없는 종류·구역은 KDPA로
-        vw = [(g, extra.get("name") or area_name(layer, key, remarks)) for key, g, remarks, extra in groups if not g.is_empty]
-        kgroups, kdup = kdpa_groups(layer, kd, [g for g, _ in vw], [n for _, n in vw])
-        if not groups and not kgroups:
+                groups, vdrop = vworld_rest(groups, eco)
+        # 3) KDPA — 생태·자연도·브이월드 모두에 없는 종류에만(layers.py의 kdpa)
+        kgroups, kdup = kdpa_groups(layer, kd, [], [])
+        if not eco and not groups and not kgroups:
             print(f"  {layer['name']}: 자료 없음 — 건너뜀")
             continue
         tol = SIMPLIFY.get(layer["id"], 0.0002)
         rows, map_feats = [], []
-        for key, geom, remarks, extra in groups + kgroups:
+        for key, geom, remarks, extra in eco + groups + kgroups:
             geom = polygonal(geom)
             if geom is None or geom.is_empty:
                 continue
             aid = layer["id"] + "-" + hashlib.sha1(json.dumps(key, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:8]
             name = extra.get("name") or area_name(layer, key, remarks)
+            if extra.get("rest"):
+                name = f"{name} (일부)"
             area_ha = round(gpd.GeoSeries([geom], crs=4326).to_crs(5179).area.iloc[0] / 1e4, 2)
             minx, miny, maxx, maxy = (round(v, 5) for v in geom.bounds)
             got = {k: key.get(k) or extra.get(k, "") for k in ("uname", "sido_name", "sigg_name")}
@@ -379,7 +507,7 @@ def main():
                 {"type": "Feature", "properties": props, "geometry": full}]}, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
             idx = len(areas_out)
             areas_out.append([aid, li, name, got["uname"], got["sido_name"], got["sigg_name"],
-                              notice, area_ha, [minx, miny, maxx, maxy], props["비고"], "k" if extra.get("source") else ""])
+                              notice, area_ha, [minx, miny, maxx, maxy], props["비고"], extra.get("src", "")])
             # 줄인 경계는 조각끼리 겹치거나 꼬일 수 있어 1m 격자에 맞춰 바로잡음(지도에서 빈 삼각형처럼 보이는 것 방지)
             simple = (geojson_geom(shapely.set_precision(geom.simplify(tol, preserve_topology=True), 1e-5), 5)
                       or geojson_geom(shapely.set_precision(geom, 1e-6), 6))   # 아주 작은 구역은 줄이면 사라지므로 원본으로
@@ -412,9 +540,15 @@ def main():
                            "shp_mb": round((REL / f"{layer['id']}-shp.zip").stat().st_size / 1e6, 2),
                            "geojson_mb": round((REL / f"{layer['id']}-geojson.zip").stat().st_size / 1e6, 2),
                            "map_mb": round((DATA / "map" / f"{layer['id']}.json").stat().st_size / 1e6, 2)})
-        layers_out[-1]["kdpa_count"] = len(kgroups)
-        kinfo = f" · KDPA 보충 {len(kgroups):,}(겹쳐서 뺀 것 {kdup:,})" if layer.get("kdpa") and kd is not None else ""
-        print(f"  {layer['name']}: 브이월드 조각 {n_parts:,} → 구역 {len(rows):,}{kinfo} · 지도 {layers_out[-1]['map_mb']} MB · SHP {layers_out[-1]['shp_mb']} MB", flush=True)
+        layers_out[-1].update({"eco_count": len(eco), "vworld_count": len(groups), "kdpa_count": len(kgroups)})
+        info = []
+        if eco:
+            info.append(f"생태·자연도 {len(eco):,}")
+        if n_parts:
+            info.append(f"브이월드 {len(groups):,}(조각 {n_parts:,}" + (f", 생태·자연도와 겹쳐 뺀 구역 {vdrop:,}" if eco else "") + ")")
+        if kgroups:
+            info.append(f"KDPA {len(kgroups):,}")
+        print(f"  {layer['name']}: 구역 {len(rows):,} = {' + '.join(info)} · 지도 {layers_out[-1]['map_mb']} MB · SHP {layers_out[-1]['shp_mb']} MB", flush=True)
 
     # 전체를 한 GeoPackage로(레이어별 표)
     gpkg = REL / "protected-areas.gpkg"
@@ -427,8 +561,9 @@ def main():
     (DATA / "index.json").write_text(json.dumps({
         "generatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "source": SOURCE, "kdpaSource": KDPA_SOURCE, "kdpaVersion": (kd["version"].iloc[0] if kd is not None and len(kd) else ""),
+        "ecoSource": ECO_SOURCE(ez_meta) if ez is not None else "",
         "groups": GROUPS, "layers": layers_out,
-        # src: ‘k’면 KDPA에서 가져온 구역(비어 있으면 브이월드)
+        # src: ‘e’ 생태·자연도, ‘k’ KDPA, 비어 있으면 브이월드
         "columns": ["id", "layer", "name", "sub", "sido", "sigg", "notice", "area_ha", "bbox", "remark", "src"],
         "areas": areas_out,
     }, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")

@@ -19,7 +19,7 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from layers import LAYERS  # noqa: E402
+from layers import ADMIN, LAYERS  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 API = "https://api.vworld.kr/req/data"
@@ -88,7 +88,7 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     summary_path = OUT / "summary.json"   # 일부 레이어만 받을 때는 나머지 기록을 남겨 둠
     summary = json.loads(summary_path.read_text(encoding="utf-8")) if only and summary_path.exists() else {}
-    for layer in LAYERS:
+    for layer in LAYERS + [ADMIN]:   # 행정경계는 생태·자연도 구역의 소재지를 붙일 때 씀
         if (only and layer["id"] not in only) or not layer.get("data"):   # data가 없으면 KDPA만 쓰는 종류
             continue
         t = time.time()

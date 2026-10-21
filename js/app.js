@@ -11,10 +11,11 @@
     "baekdu", "marine-mpa"];
   const VW_SOURCE = "국토교통부 브이월드(디지털트윈국토) 2D 데이터 API";
   const KDPA_SOURCE = "한국보호지역 통합DB(KDPA, kdpa.kr)";
+  const SRC_SHORT = { k: "KDPA" };   // 구역 출처(index의 src): k면 KDPA, 그 밖은 브이월드
   // 모든 레이어를 캔버스 하나에 그림(묶음마다 캔버스를 따로 두면 맨 위 캔버스가 마우스를 가로채 아래 구역이 안 눌림).
   // 겹칠 때 위에 올 순서: 넓게 퍼진 구역은 아래, 작은 구역은 위
   const STACK = ["coast-conserve", "env-sea", "fishery", "riparian", "special-measure", "greenbelt", "natenv", "forest", "baekdu",
-    "park-national", "park-province", "park-county", "kdpa-other", "landscape", "urbanpark", "water", "heritage", "natural-heritage",
+    "park-national", "park-province", "park-county", "kdpa-other", "landscape", "urbanpark", "water", "heritage", "natural-heritage", "scenic",
     "protect-district", "air", "temple", "eco-landscape", "special-island", "marine-mpa", "wetland-coast", "wetland", "wildlife"];
   const FIELDS = [["구역id", "AREA_ID"], ["이름", "NAME"], ["종류", "TYPE"], ["세부구분", "SUBTYPE"], ["시도", "SIDO"], ["시군구", "SIGUNGU"],
     ["고시", "NOTICE"], ["비고", "REMARK"], ["면적_ha", "AREA_HA"], ["근거법령", "LAW"], ["출처", "SOURCE"]];
@@ -47,13 +48,14 @@
     const d = await res.json();
     S.groups = d.groups;
     S.at = d.generatedAt;
+    S.ecoSource = d.ecoSource || "";
     S.layers = d.layers.map((l, i) => ({ ...l, i }));
     const layerIdx = new Map(S.layers.map((l) => [l.id, l.i]));
     // 구역 행: [id, layer, name, sub, sido, sigg, notice, area_ha, bbox, remark]
     // 구역 id는 '<레이어 id>-<해시>' 꼴이라 레이어는 id에서 찾음(빠진 레이어가 있어도 번호가 어긋나지 않게)
     S.areas = d.areas.map((r, idx) => ({
       idx, id: r[0], li: layerIdx.get(r[0].slice(0, r[0].lastIndexOf("-"))), name: r[2], sub: r[3], sido: r[4], sigg: r[5],
-      notice: r[6], ha: r[7], bbox: r[8], remark: r[9] || "", kdpa: r[10] === "k",
+      notice: r[6], ha: r[7], bbox: r[8], remark: r[9] || "", src: r[10] || "",
     }));
     S.byId = new Map(S.areas.map((a) => [a.id, a]));
   };
@@ -85,7 +87,7 @@
         ${a.notice ? `<dt>고시</dt><dd>${esc(a.notice)}</dd>` : ""}
         <dt>면적</dt><dd>${haText(a.ha)}</dd>
         ${a.remark ? `<dt>비고</dt><dd>${esc(a.remark)}</dd>` : ""}
-        <dt>출처</dt><dd>${a.kdpa ? "KDPA" : "브이월드"}</dd>
+        <dt>출처</dt><dd>${SRC_SHORT[a.src] || "브이월드"}</dd>
       </dl>
       <div class="pop-actions">
         <a class="btn btn-primary btn-sm" href="#area/${encodeURIComponent(a.id)}">상세</a>
@@ -420,7 +422,7 @@
             ${a.remark ? `<dt>비고</dt><dd>${esc(a.remark)}</dd>` : ""}
             <dt>근거 법령</dt><dd>${esc(l.law)}</dd>
             <dt>구역 id</dt><dd><code>${esc(a.id)}</code></dd>
-            <dt>출처</dt><dd>${a.kdpa ? esc(KDPA_SOURCE) : `국토교통부 브이월드(${esc(l.data)})`}</dd>
+            <dt>출처</dt><dd>${a.src === "e" ? esc(S.ecoSource || VW_SOURCE) : a.src === "k" ? esc(KDPA_SOURCE) : `국토교통부 브이월드(${esc(l.data)})`}</dd>
           </dl>
           <div class="dl-buttons">
             <button class="btn btn-primary" data-dl="shp" data-id="${esc(a.id)}">SHP 내려받기</button>
