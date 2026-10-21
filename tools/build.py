@@ -273,9 +273,14 @@ def kdpa_groups(layer, kd, vw_geoms, vw_names=()):
     """KDPA 구역 → group_areas와 같은 꼴(브이월드 우선).
     같은 종류의 브이월드 구역이 있으면 ① 절반 넘게 겹치거나 ② 고유 이름이 같은 브이월드 구역과 조금이라도 겹치거나
     ③ 이름 없이 전국을 한 조각으로 묶은 옛 자료(예: 2009년 ‘경관보호구역’)이면 이미 있는 것으로 보고 뺌."""
-    if kd is None or not layer.get("kdpa"):
+    pick = layer.get("kdpa_pick")   # {지정 유형: [이름, …]} — 새로 지정돼 다른 자료에 아직 없는 구역만 골라 넣을 때
+    if kd is None or not (layer.get("kdpa") or pick):
         return [], 0
-    part = kd[kd["DESIG"].isin(layer["kdpa"])]
+    if layer.get("kdpa"):
+        part = kd[kd["DESIG"].isin(layer["kdpa"])]
+    else:
+        names = kd["ORIG_NAME"].fillna("").map(clean)
+        part = kd[[d in pick and n in pick[d] for d, n in zip(kd["DESIG"], names)]]
     part = part[part.geometry.notna() & ~part.geometry.is_empty & (shapely.area(part.geometry.values) > 0)]
     share = covered_share(list(part.geometry), vw_geoms)
     vw_cores = {c for c in map(core_name, vw_names) if len(c) >= 2}
@@ -286,17 +291,17 @@ def kdpa_groups(layer, kd, vw_geoms, vw_names=()):
         label = KDPA_LABEL.get(desig, desig)
         core = core_name(re.sub(r"^\d+_", "", clean(r["ORIG_NAME"])))
         if vw_geoms and (s >= 0.5 or (s > 0 and core in vw_cores) or not core):
-            dup += 1
+            dup += 1   # 골라 넣은 구역도 브이월드 등에 들어오면 여기서 자동으로 빠짐
             continue
         name, detail = kdpa_name(r, desig, label)
-        codes = [c for c in str(r.get("SUB_LOC") or "").split(";") if c]
+        codes = [c for c in re.split(r"[;,]", str(r.get("SUB_LOC") or "")) if c]
         sido = KDPA_SIDO.get(codes[0], "") if len(codes) == 1 else ""
         yr = r.get("STATUS_YR")
         remarks = [x for x in (
             detail[:80],
             "관리 " + next((ko for en, ko in KDPA_AUTH if clean(r.get("MANG_AUTH")).lower().startswith(en.lower())), clean(r.get("MANG_AUTH")))
             if clean(r.get("MANG_AUTH")) else "",
-            "브이월드에 없어 KDPA로 보충 — 현행 여부 확인" if vw_geoms else "",
+            "새로 지정되어 브이월드에 아직 없는 구역(KDPA 경계)" if pick else "브이월드에 없어 KDPA로 보충 — 현행 여부 확인" if vw_geoms else "",
             "여러 시도에 걸침" if len(codes) > 1 else "",
             "자연공존지역(OECM)" if r.get("SITE_TYPE") == "oecm" else "",
             f"KDPA {r.get('version', '')} · WDPA {r['WDPAID']}",
@@ -475,7 +480,8 @@ def main():
                 groups = group_areas(layer, gdf.set_crs(4326, allow_override=True))
                 groups, vdrop = vworld_rest(groups, eco)
         # 3) KDPA — 생태·자연도·브이월드 모두에 없는 종류에만(layers.py의 kdpa)
-        kgroups, kdup = kdpa_groups(layer, kd, [], [])
+        known = [(g, extra.get("name") or area_name(layer, key, remarks)) for key, g, remarks, extra in eco + groups if not g.is_empty]
+        kgroups, kdup = kdpa_groups(layer, kd, [g for g, _ in known], [n for _, n in known]) if layer.get("kdpa_pick") else kdpa_groups(layer, kd, [], [])
         if not eco and not groups and not kgroups:
             print(f"  {layer['name']}: 자료 없음 — 건너뜀")
             continue

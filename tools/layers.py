@@ -5,7 +5,9 @@
 
 data: 브이월드 레이어, ecozone: 생태·자연도 별도관리지역의 종류 열, kdpa: KDPA 지정 유형(DESIG),
 group: 지도 필터 묶음, color: 지도 색, law: 근거 법령(안내용), keep: 남길 세부 구분(uname)만,
-filter: 받을 때 브이월드에서 미리 거를 조건(attrFilter)
+filter: 받을 때 브이월드에서 미리 거를 조건(attrFilter),
+kdpa_pick: {KDPA 지정 유형: [이름, …]} — 새로 지정돼 다른 자료에 아직 없는 구역만 KDPA에서 골라 넣음
+           (나중에 다른 자료에 들어와 절반 넘게 겹치면 자동으로 빠짐)
 """
 
 GROUPS = {
@@ -31,7 +33,7 @@ LAYERS = [
     {"id": "special-island", "data": None, "name": "특정도서", "group": "nature", "color": "#fd7e14",
      "law": "독도 등 도서지역의 생태계보전에 관한 특별법 제4조", "kdpa": ["특정도서"]},
     {"id": "park-national", "data": "LT_C_WGISNPGUG", "ecozone": "국립공원", "name": "국립공원", "group": "nature", "color": "#2b8a3e",
-     "law": "자연공원법 제4조"},
+     "law": "자연공원법 제4조", "kdpa_pick": {"국립공원": ["금정산"]}},   # 2026-03-03 지정(24번째)
     {"id": "park-province", "data": "LT_C_WGISNPDO", "ecozone": "도립공원", "name": "도립공원", "group": "nature", "color": "#40c057",
      "law": "자연공원법 제4조의2"},
     {"id": "park-county", "data": "LT_C_WGISNPGUN", "ecozone": "군립공원", "name": "군립공원", "group": "nature", "color": "#69db7c",
