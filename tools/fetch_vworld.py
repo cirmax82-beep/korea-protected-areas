@@ -3,7 +3,8 @@
     VWORLD_KEY=인증키 python tools/fetch_vworld.py            # 전체
     VWORLD_KEY=인증키 python tools/fetch_vworld.py wildlife water  # 일부 레이어만
 
-- 인증키는 환경 변수 VWORLD_KEY로만 받습니다(코드·저장소에 두지 않음). GitHub Actions에서는 저장소 비밀값.
+- 인증키는 환경 변수 VWORLD_KEY 또는 이 컴퓨터의 work/vworld_key.txt(tools/save-key.ps1로 저장, 저장소에 올라가지 않음)에서 읽습니다.
+- 브이월드는 해외 IP 접속을 막으므로 GitHub 서버(미국)에서는 받을 수 없고, 국내 컴퓨터에서 실행해야 합니다.
 - 인증키 발급 때 넣은 서비스 URL을 VWORLD_DOMAIN으로 함께 보냅니다(서버에서 부를 때 필요).
 - 한 번에 1,000건까지라 페이지를 넘겨 받고, 검색 상자가 너무 크다고 거절하면 상자를 4등분해 다시 받습니다.
 - 결과: work/raw/<레이어 id>.geojson, work/raw/summary.json
@@ -38,7 +39,7 @@ def call(key, domain, data, box, page):
         try:
             with urllib.request.urlopen(urllib.request.Request(url, headers={"Referer": domain}), timeout=120) as r:
                 return json.load(r)["response"]
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
+        except (urllib.error.URLError, OSError, json.JSONDecodeError) as e:
             if attempt == 5:
                 raise RuntimeError(f"{data} {box} p{page}: {e}") from e
             time.sleep(3 * (attempt + 1))
@@ -75,8 +76,11 @@ def fetch_box(key, domain, data, box, depth=0):
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     key = os.environ.get("VWORLD_KEY")
+    key_file = ROOT / "work" / "vworld_key.txt"   # tools/save-key.ps1 로 저장(저장소에 올라가지 않음)
+    if not key and key_file.exists():
+        key = key_file.read_text(encoding="utf-8").strip()
     if not key:
-        raise SystemExit("환경 변수 VWORLD_KEY(브이월드 인증키)가 없습니다.")
+        raise SystemExit("브이월드 인증키가 없습니다. tools/save-key.ps1 로 저장하거나 VWORLD_KEY를 지정하세요.")
     domain = os.environ.get("VWORLD_DOMAIN", "https://protect.biogrideia.com")
     only = set(sys.argv[1:])
     OUT.mkdir(parents=True, exist_ok=True)

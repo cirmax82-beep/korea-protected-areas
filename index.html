@@ -4,23 +4,121 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>보호구역 종합포털</title>
-  <meta name="description" content="국내 생물·환경 보호구역을 지도에서 보고 경계를 SHP·GeoJSON으로 내려받는 포털입니다(준비 중)." />
-  <style>
-    :root { --bg: #f3f5f1; --text: #1d2a20; --muted: #5d6b60; --accent: #2b8a3e; }
-    @media (prefers-color-scheme: dark) { :root { --bg: #111713; --text: #e3eae2; --muted: #9aa89b; --accent: #51cf66; } }
-    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--text);
-      font-family: "Noto Sans KR", -apple-system, "Malgun Gothic", sans-serif; padding: 16px; box-sizing: border-box; }
-    main { max-width: 560px; text-align: center; }
-    h1 { margin: 0 0 8px; font-size: 28px; }
-    p { color: var(--muted); line-height: 1.6; }
-    a { color: var(--accent); }
-  </style>
+  <meta name="description" content="야생생물보호구역, 습지보호지역, 국립·도립·군립공원, 산림보호구역, 백두대간보호지역, 상수원보호구역, 국가유산 보호구역 등 국내 생물·환경 보호구역을 지도에서 보고 경계를 SHP·GeoJSON·KML로 내려받는 포털입니다." />
+  <meta property="og:title" content="보호구역 종합포털" />
+  <meta property="og:description" content="국내 생물·환경 보호구역 지도와 경계(SHP·GeoJSON·KML) 내려받기" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%232b8a3e'/%3E%3Cpath d='M16 6l8 3v6c0 5-3.5 9-8 11-4.5-2-8-6-8-11V9z' fill='%23fff'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+  <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
+  <header class="topbar">
+    <a class="brand" href="#map">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="15" fill="currentColor"/><path d="M16 6l8 3v6c0 5-3.5 9-8 11-4.5-2-8-6-8-11V9z" fill="#fff"/></svg>
+      <span><strong>보호구역 종합포털</strong><small>국내 생물·환경 보호구역 지도와 경계 내려받기</small></span>
+    </a>
+    <nav class="tabs">
+      <a class="tab" href="#map" data-view="map">지도</a>
+      <a class="tab" href="#list" data-view="list">구역 목록</a>
+      <a class="tab" href="#download" data-view="download">내려받기</a>
+      <a class="tab" href="#about" data-view="about">자료 안내</a>
+    </nav>
+  </header>
+
   <main>
-    <h1>보호구역 종합포털</h1>
-    <p>국내 생물·환경 관련 보호구역을 지도에서 보고, 구역별 경계를 SHP·GeoJSON으로 내려받을 수 있는 포털을 준비하고 있습니다.</p>
-    <p>시군구별 보호구역 지정 현황은 <a href="https://zone.biogrideia.com/">환경 지구·지역 현황</a>에서 볼 수 있습니다.</p>
+    <!-- 지도 -->
+    <section class="view" id="view-map">
+      <aside class="sidebar" id="sidebar">
+        <div class="side-head">
+          <input type="search" id="q" class="input" placeholder="이름·시군구 검색 (예: 우포, 함평)" autocomplete="off" />
+          <button class="icon-btn only-mobile" id="side-close" aria-label="닫기">✕</button>
+        </div>
+        <div id="search-results" class="search-results" hidden></div>
+        <div class="side-row">
+          <select id="sido" class="input" aria-label="시도"><option value="">전국</option></select>
+          <span class="link-row"><button class="link" id="layers-default">기본</button> · <button class="link" id="layers-none">모두 끄기</button></span>
+        </div>
+        <div id="layer-list" class="layer-list"></div>
+        <p class="muted small side-note">큰 레이어(산림보호구역·국가유산 등)는 켤 때 몇 초 걸릴 수 있습니다. 경계는 법적 효력이 없는 참고 자료이며, 정확한 범위는 각 고시 도면을 확인하세요.</p>
+      </aside>
+      <div class="map-wrap">
+        <div id="map"></div>
+        <button class="btn btn-light map-btn only-mobile" id="side-open">☰ 레이어·검색</button>
+        <div class="loading" id="loading" hidden>불러오는 중…</div>
+      </div>
+    </section>
+
+    <!-- 구역 목록 -->
+    <section class="view" id="view-list">
+      <div class="page">
+        <h1>구역 목록</h1>
+        <div class="toolbar">
+          <input type="search" id="list-q" class="input" placeholder="이름·시군구·비고 검색" />
+          <select id="list-layer" class="input" aria-label="종류"><option value="">모든 종류</option></select>
+          <select id="list-sido" class="input" aria-label="시도"><option value="">전국</option></select>
+          <span class="muted" id="list-count"></span>
+        </div>
+        <div class="table-wrap"><table class="table" id="list-table"></table></div>
+        <div class="pager" id="list-pager"></div>
+      </div>
+    </section>
+
+    <!-- 구역 상세 -->
+    <section class="view" id="view-area">
+      <div class="page">
+        <p><a class="link" href="#list">← 구역 목록</a></p>
+        <div id="area-body"></div>
+      </div>
+    </section>
+
+    <!-- 내려받기 -->
+    <section class="view" id="view-download">
+      <div class="page">
+        <h1>내려받기</h1>
+        <p class="muted">종류별 전체 경계를 SHP(zip)·GeoJSON(zip)으로, 또는 모든 종류를 하나의 GeoPackage로 받을 수 있습니다. 구역 하나만 필요하면 지도나 구역 목록에서 구역을 눌러 받으세요.</p>
+        <div class="table-wrap"><table class="table" id="dl-table"></table></div>
+        <div class="panel">
+          <h3>파일 형식</h3>
+          <ul class="plain">
+            <li>좌표계: WGS84 경위도(EPSG:4326). 원본 해상도 그대로이며 소수점 6자리(약 10cm)로 맞췄습니다.</li>
+            <li>SHP 속성: AREA_ID(구역 id), NAME(이름), TYPE(종류), SUBTYPE(세부 구분), SIDO, SIGUNGU, NOTICE(고시), REMARK(비고), AREA_HA(면적, ha), LAW(근거 법령), SOURCE(출처). 한글은 UTF-8(.cpg 포함)이라 QGIS·ArcGIS에서 바로 읽힙니다.</li>
+            <li>면적은 경계로 계산한 값(UTM-K)이라 고시 면적과 조금 다를 수 있습니다.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- 자료 안내 -->
+    <section class="view" id="view-about">
+      <div class="page narrow">
+        <h1>자료 안내</h1>
+        <div class="panel" id="about-status"></div>
+        <div class="panel">
+          <h3>자료 출처와 이용 조건</h3>
+          <ul class="plain">
+            <li>경계: <a href="https://www.vworld.kr" target="_blank" rel="noopener">국토교통부 브이월드(디지털트윈국토)</a> 2D 데이터 API — 토지이용규제(용도지역지구) 레이어와 자연공원·연안 레이어.</li>
+            <li>브이월드 저작권정책에 따라 국토교통부 저작물은 출처를 밝히면 자유롭게 이용할 수 있습니다(공공누리 제1유형 방식). 내려받은 자료를 쓸 때는 “출처: 국토교통부 브이월드(디지털트윈국토)”를 적어 주세요.</li>
+            <li>구역 이름은 원자료의 공원 이름·습지 이름·문화재 이름 또는 시도·시군구·세부 구분으로 만든 것이며, 같은 고시(연도·번호)의 조각을 하나의 구역으로 묶었습니다.</li>
+          </ul>
+        </div>
+        <div class="panel">
+          <h3>유의할 점</h3>
+          <ul class="plain">
+            <li>이 경계는 참고 자료이며 법적 효력이 없습니다. 인허가·평가에는 각 기관의 지정 고시와 도면을 확인하세요.</li>
+            <li>토지이용규제 자료는 지자체가 입력한 것이라 실제 지정 현황과 다르거나 빠진 구역이 있을 수 있습니다.</li>
+            <li>생태·경관보전지역, 특정도서, 해양보호구역, 수산자원보호구역처럼 브이월드에 경계가 없는 구역은 아직 넣지 못했습니다.</li>
+            <li>시군구별 지정 현황 표는 <a href="https://zone.biogrideia.com/">환경 지구·지역 현황</a>에서, 멸종위기종 분포는 <a href="https://endangered.biogrideia.com/">멸종위기종 종합관리</a>에서 볼 수 있습니다.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
   </main>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="js/shpwrite.js"></script>
+  <script src="js/app.js"></script>
 </body>
 </html>

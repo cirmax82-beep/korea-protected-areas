@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+# 구역별 경계 파일은 검색 결과에 낱개로 나오지 않게
+Disallow: /data/
+
+Sitemap: https://protect.biogrideia.com/sitemap.xml

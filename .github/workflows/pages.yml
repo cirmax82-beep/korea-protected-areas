@@ -1,0 +1,38 @@
+# main에 올리면 GitHub Pages로 배포합니다.
+# 경계 자료는 브이월드가 해외 IP를 막아 GitHub 서버에서 받을 수 없으므로, 국내 컴퓨터에서 갱신.bat으로 받아 올립니다.
+name: 배포
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/configure-pages@v6
+      - name: 배포할 파일만 모으기
+        run: |
+          mkdir -p _site
+          cp -r index.html css js data robots.txt sitemap.xml _site/ 2>/dev/null || true
+          [ -f CNAME ] && cp CNAME _site/ || true
+          ls _site
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v5
