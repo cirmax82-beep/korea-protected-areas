@@ -30,6 +30,7 @@ jobs:
           mkdir -p _site
           cp -r index.html css js data robots.txt sitemap.xml _site/ 2>/dev/null || true
           [ -f CNAME ] && cp CNAME _site/ || true
+          cp naver*.html google*.html _site/ 2>/dev/null || true   # 검색 등록 소유 확인 파일
           ls _site
       - uses: actions/upload-pages-artifact@v5
         with:
