@@ -8,12 +8,15 @@
   const RELEASE = "https://github.com/cirmax82-beep/korea-protected-areas/releases/download/data-latest/";
   const JSZIP_URL = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
   const DEFAULT_ON = ["wildlife", "wetland", "wetland-coast", "park-national", "park-province", "park-county", "baekdu"];
-  const PANE_Z = { env: 410, heritage: 420, marine: 415, nature: 430 };
+  // 모든 레이어를 캔버스 하나에 그림(묶음마다 캔버스를 따로 두면 맨 위 캔버스가 마우스를 가로채 아래 구역이 안 눌림).
+  // 겹칠 때 위에 올 순서: 넓게 퍼진 구역은 아래, 작은 구역은 위
+  const STACK = ["coast-conserve", "greenbelt", "natenv", "forest", "baekdu", "park-national", "park-province", "park-county",
+    "urbanpark", "water", "heritage", "protect-district", "air", "temple", "wetland-coast", "wetland", "wildlife"];
   const FIELDS = [["구역id", "AREA_ID"], ["이름", "NAME"], ["종류", "TYPE"], ["세부구분", "SUBTYPE"], ["시도", "SIDO"], ["시군구", "SIGUNGU"],
     ["고시", "NOTICE"], ["비고", "REMARK"], ["면적_ha", "AREA_HA"], ["근거법령", "LAW"], ["출처", "SOURCE"]];
 
   const S = { groups: {}, layers: [], areas: [], byId: new Map(), on: new Set(DEFAULT_ON), geo: {}, featLayer: new Map(), sido: "", at: null };
-  let map, areaMap;
+  let map, areaMap, renderer;
 
   const toast = (msg, ms = 2600) => {
     const el = $("#toast");
@@ -65,7 +68,7 @@
     L.control.layers(base, null, { position: "topright" }).addTo(map);
     L.control.scale({ imperial: false, position: "bottomright" }).addTo(map);
     map.attributionControl.addAttribution('경계: <a href="https://www.vworld.kr" target="_blank" rel="noopener">국토교통부 브이월드</a>');
-    Object.entries(PANE_Z).forEach(([g, z]) => { map.createPane(`pane-${g}`).style.zIndex = z; });
+    renderer = L.canvas({ padding: 0.3, tolerance: 2 });
   };
 
   const popupHtml = (a) => {
@@ -91,7 +94,7 @@
   const buildLayer = (l) => {
     const color = l.color;
     return L.geoJSON(S.geo[l.id], {
-      pane: `pane-${l.group}`,
+      renderer,
       filter: (f) => visible(S.areas[f.properties.i]),
       style: () => ({ color, weight: 1, opacity: 0.9, fillColor: color, fillOpacity: 0.3 }),
       onEachFeature: (f, layer) => {
@@ -122,6 +125,13 @@
     if (!S.on.has(l.id)) return;   // 받는 사이 꺼졌으면
     if (!l.leaflet) l.leaflet = buildLayer(l);
     l.leaflet.addTo(map);
+    restack();
+  };
+
+  // 켜진 레이어를 STACK 순서대로 다시 쌓음(나중에 켠 큰 레이어가 작은 구역을 덮지 않게)
+  const restack = () => {
+    const rank = (l) => { const i = STACK.indexOf(l.id); return i < 0 ? STACK.length : i; };
+    S.layers.filter((l) => l.leaflet && map.hasLayer(l.leaflet)).sort((a, b) => rank(a) - rank(b)).forEach((l) => l.leaflet.bringToFront());
   };
 
   const refreshLayers = () => {
