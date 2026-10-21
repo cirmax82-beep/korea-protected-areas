@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>보호구역 종합포털</title>
-  <meta name="description" content="야생생물보호구역, 습지보호지역, 국립·도립·군립공원, 산림보호구역, 백두대간보호지역, 상수원보호구역, 국가유산 보호구역 등 국내 생물·환경 보호구역을 지도에서 보고 경계를 SHP·GeoJSON·KML로 내려받는 포털입니다." />
+  <meta name="description" content="야생생물보호구역, 습지보호지역, 국립·도립·군립공원, 산림보호구역, 백두대간보호지역, 상수원보호구역, 국가유산 보호구역 등 국내 생물·환경 보호구역을 지도에서 보고 경계를 SHP·GeoJSON·KML로 내려받으며, 사업지와 보호구역의 이격거리를 분석하는 포털입니다." />
   <meta name="naver-site-verification" content="4d5f4f9724acfa07c0240d5bc103ff06665c77f6" />
   <meta property="og:title" content="보호구역 종합포털" />
   <meta property="og:description" content="국내 생물·환경 보호구역 지도와 경계(SHP·GeoJSON·KML) 내려받기" />
@@ -21,6 +21,7 @@
     </a>
     <nav class="tabs">
       <a class="tab" href="#map" data-view="map">지도</a>
+      <a class="tab" href="#analyze" data-view="analyze">사업지 분석</a>
       <a class="tab" href="#list" data-view="list">구역 목록</a>
       <a class="tab" href="#download" data-view="download">내려받기</a>
       <a class="tab" href="#about" data-view="about">자료 안내</a>
@@ -47,6 +48,94 @@
         <div id="map"></div>
         <button class="btn btn-light map-btn only-mobile" id="side-open">☰ 레이어·검색</button>
         <div class="loading" id="loading" hidden>불러오는 중…</div>
+      </div>
+    </section>
+
+    <!-- 사업지 분석 -->
+    <section class="view" id="view-analyze">
+      <aside class="an-side">
+        <div class="an-step">
+          <h3><span class="num">1</span>사업지</h3>
+          <input id="an-name" class="input wide" placeholder="사업지 이름 (파일 이름에 씁니다)" maxlength="40" />
+          <div class="seg" id="an-src" role="tablist">
+            <button data-src="addr" class="on">주소·장소</button><button data-src="coord">좌표</button><button data-src="draw">지도에 그리기</button><button data-src="file">파일</button>
+          </div>
+          <div class="an-pane" data-pane="addr">
+            <form id="an-addr-form" class="row">
+              <input id="an-addr" class="input grow" type="search" placeholder="도로명 주소나 장소 이름" autocomplete="off" />
+              <button class="btn btn-primary">찾기</button>
+            </form>
+            <div id="an-addr-res" class="search-results" hidden></div>
+            <p class="muted small">오픈스트리트맵(Nominatim)으로 찾으며 검색어가 그 서버로 갑니다. 지번 주소는 잘 안 찾아지니 도로명 주소·장소 이름으로 찾거나, ‘지도에 그리기’에서 점을 찍으세요.</p>
+          </div>
+          <div class="an-pane" data-pane="coord" hidden>
+            <textarea id="an-coord" class="input wide" rows="5" spellcheck="false" placeholder="한 줄에 한 점씩&#10;35.2386, 128.9654&#10;(TM 좌표는 X, Y — 앞에 점 번호가 있어도 됩니다)"></textarea>
+            <div class="row">
+              <select id="an-crs" class="input grow" aria-label="좌표계"></select>
+              <select id="an-shape" class="input" aria-label="모양">
+                <option value="auto">모양 자동</option><option value="point">점</option><option value="line">선</option><option value="polygon">면(구역계)</option>
+              </select>
+            </div>
+            <div class="row" id="an-order-row" hidden>
+              <select id="an-order" class="input grow" aria-label="좌표 순서">
+                <option value="auto">순서 자동</option><option value="en">X=동쪽, Y=북쪽 (GIS·CAD)</option><option value="ne">X=북쪽, Y=동쪽 (측량 성과표)</option>
+              </select>
+            </div>
+            <button class="btn btn-primary" id="an-coord-go">사업지로 정하기</button>
+            <p class="muted small">점이 1개면 점, 2개면 선, 3개 이상이면 구역계(면)로 잇습니다. 경위도는 도·분·초(37°30′15″)도 됩니다.</p>
+          </div>
+          <div class="an-pane" data-pane="draw" hidden>
+            <div class="row">
+              <button class="btn btn-light" data-draw="point">점 찍기</button>
+              <button class="btn btn-light" data-draw="line">선 그리기</button>
+              <button class="btn btn-light" data-draw="polygon">구역 그리기</button>
+            </div>
+            <div class="row draw-bar" id="an-draw-bar" hidden>
+              <span id="an-draw-msg" class="grow small"></span>
+              <button class="btn btn-primary btn-sm" id="an-draw-done">완료</button>
+              <button class="btn btn-light btn-sm" id="an-draw-undo">한 점 지우기</button>
+              <button class="btn btn-light btn-sm" id="an-draw-cancel">취소</button>
+            </div>
+            <p class="muted small">지도를 눌러 꼭짓점을 찍고 ‘완료’를 누르세요. 마지막 점을 두 번 눌러도 끝납니다.</p>
+          </div>
+          <div class="an-pane" data-pane="file" hidden>
+            <label class="drop" id="an-drop">
+              <input type="file" id="an-file" multiple accept=".zip,.shp,.shx,.dbf,.prj,.cpg,.geojson,.json,.kml,.dxf" />
+              <b>파일을 끌어다 놓거나 눌러서 고르기</b>
+              <span class="muted small">SHP(zip, 또는 .shp·.prj 함께) · GeoJSON · KML · DXF</span>
+            </label>
+            <div class="row">
+              <span class="small nowrap">좌표계 정보가 없으면</span>
+              <select id="an-file-crs" class="input grow" aria-label="파일 좌표계"></select>
+            </div>
+            <p class="muted small">.prj가 있으면 그 좌표계를 씁니다. CAD 도면(DXF)은 닫힌 폴리선을 구역계로 읽습니다. DWG는 DXF로 저장해 올려 주세요. 파일은 이 컴퓨터 안에서만 읽고 어디에도 보내지 않습니다.</p>
+          </div>
+          <div id="an-site" class="an-site" hidden></div>
+        </div>
+        <div class="an-step">
+          <h3><span class="num">2</span>반경</h3>
+          <div class="chips" id="an-chips"></div>
+          <div class="row">
+            <input type="number" id="an-radius" class="input" min="0.1" max="20" step="0.1" value="10" aria-label="반경(km)" />
+            <span>km</span><span class="muted small">0.1 ~ 20 km</span>
+          </div>
+        </div>
+        <div class="an-step">
+          <h3><span class="num">3</span>볼 보호구역 <span class="link-row"><button class="link" id="an-types-all">모두</button> · <button class="link" id="an-types-none">모두 끄기</button></span></h3>
+          <div id="an-types" class="an-types"></div>
+        </div>
+        <div class="an-step an-go">
+          <button class="btn btn-primary wide" id="an-run">분석하기</button>
+          <div class="progress" id="an-progress" hidden><div class="bar"><i></i></div><span class="small muted"></span></div>
+        </div>
+      </aside>
+      <div class="an-main" id="an-main">
+        <div class="an-map-wrap"><div id="an-map"></div></div>
+        <div id="an-result" class="an-result">
+          <div class="an-empty muted">
+            <p><b>사업지</b>를 정하고 <b>반경</b>을 고른 뒤 <b>분석하기</b>를 누르면, 반경 안 보호구역과의 최단 이격거리·방향·겹침 면적을 표로 보여 주고 경계 SHP를 한 번에 내려받을 수 있습니다.</p>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -101,6 +190,7 @@
             <li>경계: <a href="https://www.vworld.kr" target="_blank" rel="noopener">국토교통부 브이월드(디지털트윈국토)</a> 2D 데이터 API — 토지이용규제(용도지역지구) 레이어와 자연공원·연안 레이어.</li>
             <li>브이월드 저작권정책에 따라 국토교통부 저작물은 출처를 밝히면 자유롭게 이용할 수 있습니다(공공누리 제1유형 방식). 내려받은 자료를 쓸 때는 “출처: 국토교통부 브이월드(디지털트윈국토)”를 적어 주세요.</li>
             <li>구역 이름은 원자료의 공원 이름·습지 이름·문화재 이름 또는 시도·시군구·세부 구분으로 만든 것이며, 같은 고시(연도·번호)의 조각을 하나의 구역으로 묶었습니다.</li>
+            <li>‘사업지 분석’은 브라우저 안에서 계산하며 올린 파일은 어디에도 보내지 않습니다. 주소 검색만 오픈스트리트맵(Nominatim)에 검색어를 보냅니다.</li>
           </ul>
         </div>
         <div class="panel">
@@ -121,5 +211,6 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
   <script src="js/shpwrite.js"></script>
   <script src="js/app.js"></script>
+  <script src="js/analyze.js"></script>
 </body>
 </html>

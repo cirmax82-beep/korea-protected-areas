@@ -151,9 +151,7 @@
     const todo = [...want].filter((id) => !detailShown.has(id));
     for (let i = 0; i < todo.length; i += 8) {
       await Promise.all(todo.slice(i, i + 8).map(async (id) => {
-        if (!detailCache.has(id)) {
-          try { detailCache.set(id, await (await fetch(`data/area/${encodeURIComponent(id)}.json`)).json()); } catch (_) { return; }
-        }
+        try { await areaGeo(id); } catch (_) { /* 못 받은 구역은 줄인 경계로 둠 */ }
       }));
       if (seq !== detailSeq) return;   // 그사이 지도를 옮겼으면 새 요청에 맡김
       todo.slice(i, i + 8).forEach((id) => {
@@ -300,16 +298,29 @@
   };
 
   // ---------- 구역별 내려받기 ----------
-  let jszipP = null;
-  const loadJSZip = () => jszipP || (jszipP = new Promise((resolve, reject) => {
-    if (window.JSZip) return resolve();
-    const s = document.createElement("script");
-    s.src = JSZIP_URL;
-    s.onload = resolve;
-    s.onerror = () => { jszipP = null; reject(new Error("압축 도구를 불러오지 못했습니다.")); };
-    document.head.appendChild(s);
-  }));
-  const areaGeo = async (id) => (await fetch(`data/area/${encodeURIComponent(id)}.json`)).json();
+  // 필요할 때만 불러오는 도구(압축·지오메트리 계산 등)
+  const scripts = new Map();
+  const loadScript = (url, global) => {
+    if (global && window[global]) return Promise.resolve();
+    if (!scripts.has(url)) scripts.set(url, new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = url;
+      s.onload = resolve;
+      s.onerror = () => { scripts.delete(url); s.remove(); reject(new Error("도구를 불러오지 못했습니다. 인터넷 연결을 확인하세요.")); };
+      document.head.appendChild(s);
+    }));
+    return scripts.get(url);
+  };
+  const loadJSZip = () => loadScript(JSZIP_URL, "JSZip");
+  // 원본 경계(지도 확대 표시·내려받기·사업지 분석이 함께 씀)
+  const areaGeo = async (id) => {
+    if (detailCache.has(id)) return detailCache.get(id);
+    const res = await fetch(`data/area/${encodeURIComponent(id)}.json`);
+    if (!res.ok) throw new Error(`경계를 받지 못했습니다(${res.status}).`);
+    const fc = await res.json();
+    detailCache.set(id, fc);
+    return fc;
+  };
   const fileName = (a) => `${a.name}_${a.id}`.replace(/[\\/:*?"<>|\s]+/g, "_").slice(0, 80);
 
   const downloadArea = async (id, kind) => {
@@ -446,7 +457,7 @@
   const route = () => {
     const h = decodeURIComponent(location.hash.slice(1));
     const [view, arg] = [h.split("/")[0] || "map", h.split("/").slice(1).join("/")];
-    const name = ["map", "list", "area", "download", "about"].includes(view) ? view : "map";
+    const name = ["map", "analyze", "list", "area", "download", "about"].includes(view) ? view : "map";
     $$(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
     $$(".tab").forEach((t) => t.classList.toggle("active", t.dataset.view === (name === "area" ? "list" : name)));
     if (name !== "area") document.title = "보호구역 종합포털";
@@ -457,11 +468,15 @@
       const at = /^@(-?[\d.]+),(-?[\d.]+),(\d+(?:\.\d+)?)$/.exec(arg || "");
       if (at) setTimeout(() => map.setView([+at[1], +at[2]], +at[3]), 60);
     }
+    if (name === "analyze") { document.title = "사업지 분석 · 보호구역 종합포털"; window.Analyze && window.Analyze.show(); }
     if (name === "list") renderList();
     if (name === "area") renderArea(arg);
     if (name === "download") renderDownload();
     if (name === "about") renderAbout();
   };
+
+  // 사업지 분석(js/analyze.js)이 쓰는 공용 자료와 도구
+  window.Portal = { S, STACK, $, $$, esc, fmt, debounce, toast, saveBlob, haText, layerOf, typeBadge, loadScript, loadJSZip, areaGeo, popupHtml };
 
   const boot = async () => {
     initMap();
