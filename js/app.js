@@ -34,16 +34,37 @@
   // - 컴퓨터: 바로 받음
   // - 휴대폰: 파일을 만드는 사이 ‘사용자가 누른 동작’이 끊겨 자동 받기가 막히는 일이 많아(아이폰 사파리 등),
   //   화면 아래에 ‘받기’ 버튼을 띄워 직접 누르게 함
-  // - 카카오톡·네이버 등 앱 안 브라우저: 파일 받기를 막으므로 공유(파일 저장)를 쓰고, 안 되면 다른 브라우저로 열도록 안내
+  // - 카카오톡·네이버 등 앱 안 브라우저: 이런 파일을 받으면 깨진 파일이 저장되므로 받기 대신
+  //   휴대폰 기본 브라우저(크롬·사파리)로 같은 화면을 열게 함(카카오톡은 외부 브라우저 열기 주소를 지원)
   // 임시 주소(blob)는 바로 지우면 휴대폰에서 받기가 실패해 넉넉히 둔 뒤 지움
   const IN_APP = /\bwv\b|KAKAOTALK|NAVER\(inapp|Instagram|FBAN|FBAV|Line\/|DaumApps|everytimeApp/i.test(navigator.userAgent);
+  const KAKAO = /KAKAOTALK/i.test(navigator.userAgent);
   const MOBILE = IN_APP || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent));
+  // 카카오톡: 외부 브라우저로 열기 / 그 밖의 앱 안 브라우저: 오른쪽 위 메뉴로 직접 열도록 안내
+  const openOutside = (hash) => {
+    const url = location.href.split("#")[0] + (hash || location.hash);
+    if (KAKAO) location.href = `kakaotalk://web/openExternal?url=${encodeURIComponent(url)}`;
+    else toast("오른쪽 위 메뉴에서 ‘다른 브라우저로 열기’를 눌러 크롬·사파리에서 열어 주세요.", 7000);
+  };
   let sheetUrl = null;
   const closeSheet = () => {
     $("#dl-sheet").hidden = true;
     if (sheetUrl) { const u = sheetUrl; sheetUrl = null; setTimeout(() => URL.revokeObjectURL(u), 60000); }
   };
-  const saveBlob = (blob, name) => {
+  // reopen: 다른 브라우저로 열 때 바로 갈 화면(예: 구역 상세 #area/…)
+  const saveBlob = (blob, name, reopen) => {
+    if (IN_APP) {
+      closeSheet();
+      $("#dl-sheet-name").textContent = name;
+      $("#dl-sheet-save").hidden = true;
+      $("#dl-sheet-share").hidden = true;
+      $("#dl-sheet-note").hidden = false;
+      const out = $("#dl-sheet-out");
+      out.hidden = false;
+      out.onclick = () => openOutside(reopen);
+      $("#dl-sheet").hidden = false;
+      return;
+    }
     if (!MOBILE) {
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
@@ -63,13 +84,14 @@
     const link = $("#dl-sheet-save");
     link.href = sheetUrl;
     link.download = name;
-    link.hidden = IN_APP && canShare;
+    link.hidden = false;
     const share = $("#dl-sheet-share");
     share.hidden = !canShare;
     share.onclick = async () => {
       try { await navigator.share({ files: [file], title: name }); closeSheet(); } catch (err) { if (err.name !== "AbortError") toast("공유하지 못했습니다. ‘받기’를 눌러 보세요.", 4000); }
     };
-    $("#dl-sheet-note").hidden = !IN_APP;
+    $("#dl-sheet-note").hidden = true;
+    $("#dl-sheet-out").hidden = true;
     sheet.hidden = false;
   };
   const haText = (ha) => (ha >= 100 ? `${fmt(ha / 100, 2)} ㎢` : `${fmt(ha, 2)} ha`);
@@ -371,11 +393,12 @@
       toast("파일을 만드는 중…", 1500);
       const fc = await areaGeo(id);
       const name = fileName(a);
-      if (kind === "geojson") saveBlob(new Blob([JSON.stringify(fc)], { type: "application/geo+json" }), `${name}.geojson`);
-      else if (kind === "kml") saveBlob(new Blob([ShpWrite.kml(fc.features, "이름")], { type: "application/vnd.google-earth.kml+xml" }), `${name}.kml`);
+      const reopen = `#area/${encodeURIComponent(id)}`;   // 앱 안 브라우저에서 다른 브라우저로 열 때 이 구역으로 바로
+      if (kind === "geojson") saveBlob(new Blob([JSON.stringify(fc)], { type: "application/geo+json" }), `${name}.geojson`, reopen);
+      else if (kind === "kml") saveBlob(new Blob([ShpWrite.kml(fc.features, "이름")], { type: "application/vnd.google-earth.kml+xml" }), `${name}.kml`, reopen);
       else {
         await loadJSZip();
-        saveBlob(await ShpWrite.zip(fc.features, FIELDS, name), `${name}_shp.zip`);
+        saveBlob(await ShpWrite.zip(fc.features, FIELDS, name), `${name}_shp.zip`, reopen);
       }
     } catch (err) {
       console.warn(err);
@@ -517,6 +540,13 @@
   };
 
   $("#dl-sheet-close").onclick = closeSheet;
+  // 앱 안 브라우저로 열면 처음부터 위에 안내 띠(파일을 만들기 전에 다른 브라우저로 옮기게)
+  if (IN_APP) {
+    $("#inapp-bar").hidden = false;
+    $("#inapp-open").textContent = KAKAO ? "크롬·사파리로 열기" : "여는 방법";
+    $("#inapp-open").onclick = () => openOutside();
+    $("#inapp-close").onclick = () => { $("#inapp-bar").hidden = true; };
+  }
   $("#dl-sheet-save").addEventListener("click", () => setTimeout(closeSheet, 1500));
 
   // 사업지 분석(js/analyze.js)이 쓰는 공용 자료와 도구

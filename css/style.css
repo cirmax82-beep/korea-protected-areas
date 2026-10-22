@@ -188,6 +188,11 @@ textarea.input { resize: vertical; font-family: ui-monospace, Consolas, monospac
 .leaflet-tooltip.dist-tip { background: #c2255c; color: #fff; border: 0; font-weight: 700; font-family: var(--font); box-shadow: 0 1px 4px rgba(0, 0, 0, .3); }
 .leaflet-tooltip.dist-tip::before { display: none; }
 
+.inapp-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #fff3bf; color: #5c3c00; font-size: 13px; }
+.inapp-bar[hidden] { display: none; }
+.inapp-bar span { flex: 1; }
+.inapp-bar .icon-btn { color: #5c3c00; font-size: 15px; }
+.dl-sheet .btn { flex: 1; justify-content: center; }
 .dl-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2100; padding: 12px; display: flex; justify-content: center; }
 .dl-sheet-body { width: 100%; max-width: 520px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; box-shadow: 0 -2px 18px rgba(0, 0, 0, .18); display: grid; gap: 10px; }
 .dl-sheet-body .small { word-break: break-all; }
