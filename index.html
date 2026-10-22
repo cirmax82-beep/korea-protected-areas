@@ -207,6 +207,18 @@
   </main>
 
   <div class="toast" id="toast" hidden></div>
+  <!-- 휴대폰 내려받기: 파일이 준비되면 직접 눌러 받게 함 -->
+  <div class="dl-sheet" id="dl-sheet" role="dialog" aria-label="파일 받기" hidden>
+    <div class="dl-sheet-body">
+      <div><b>파일이 준비됐습니다</b><div class="small muted" id="dl-sheet-name"></div></div>
+      <p class="small dl-sheet-note" id="dl-sheet-note" hidden>카카오톡·네이버 같은 앱 안의 브라우저에서는 파일을 받지 못할 수 있습니다. ‘공유’로 파일 앱에 저장하거나, 오른쪽 위 메뉴의 ‘다른 브라우저로 열기’로 크롬·사파리에서 받아 주세요.</p>
+      <div class="row">
+        <a class="btn btn-primary" id="dl-sheet-save" href="#" download>받기</a>
+        <button class="btn btn-light" id="dl-sheet-share" type="button" hidden>공유·저장</button>
+        <button class="btn btn-light" id="dl-sheet-close" type="button">닫기</button>
+      </div>
+    </div>
+  </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
   <script src="js/shpwrite.js"></script>

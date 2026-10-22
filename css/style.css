@@ -188,6 +188,11 @@ textarea.input { resize: vertical; font-family: ui-monospace, Consolas, monospac
 .leaflet-tooltip.dist-tip { background: #c2255c; color: #fff; border: 0; font-weight: 700; font-family: var(--font); box-shadow: 0 1px 4px rgba(0, 0, 0, .3); }
 .leaflet-tooltip.dist-tip::before { display: none; }
 
+.dl-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2100; padding: 12px; display: flex; justify-content: center; }
+.dl-sheet-body { width: 100%; max-width: 520px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; box-shadow: 0 -2px 18px rgba(0, 0, 0, .18); display: grid; gap: 10px; }
+.dl-sheet-body .small { word-break: break-all; }
+.dl-sheet-note { margin: 0; color: var(--text-2); line-height: 1.5; }
+.dl-sheet .btn-primary { flex: 1; justify-content: center; }
 .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #1d2a20; color: #fff; padding: 10px 16px; border-radius: 8px; z-index: 2000; box-shadow: var(--shadow); }
 .only-mobile { display: none; }
 

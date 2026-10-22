@@ -30,13 +30,47 @@
     clearTimeout(toast.t);
     toast.t = setTimeout(() => { el.hidden = true; }, ms);
   };
+  // 브라우저에서 만든 파일 내려받기
+  // - 컴퓨터: 바로 받음
+  // - 휴대폰: 파일을 만드는 사이 ‘사용자가 누른 동작’이 끊겨 자동 받기가 막히는 일이 많아(아이폰 사파리 등),
+  //   화면 아래에 ‘받기’ 버튼을 띄워 직접 누르게 함
+  // - 카카오톡·네이버 등 앱 안 브라우저: 파일 받기를 막으므로 공유(파일 저장)를 쓰고, 안 되면 다른 브라우저로 열도록 안내
+  // 임시 주소(blob)는 바로 지우면 휴대폰에서 받기가 실패해 넉넉히 둔 뒤 지움
+  const IN_APP = /\bwv\b|KAKAOTALK|NAVER\(inapp|Instagram|FBAN|FBAV|Line\/|DaumApps|everytimeApp/i.test(navigator.userAgent);
+  const MOBILE = IN_APP || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent));
+  let sheetUrl = null;
+  const closeSheet = () => {
+    $("#dl-sheet").hidden = true;
+    if (sheetUrl) { const u = sheetUrl; sheetUrl = null; setTimeout(() => URL.revokeObjectURL(u), 60000); }
+  };
   const saveBlob = (blob, name) => {
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+    if (!MOBILE) {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 60000);
+      return;
+    }
+    closeSheet();
+    sheetUrl = URL.createObjectURL(blob);
+    const file = new File([blob], name, { type: blob.type || "application/octet-stream" });
+    const canShare = !!(navigator.canShare && navigator.canShare({ files: [file] }));
+    const sheet = $("#dl-sheet");
+    const kb = blob.size / 1024;
+    $("#dl-sheet-name").textContent = `${name} (${kb >= 1024 ? `${fmt(kb / 1024, 1)} MB` : `${fmt(kb)} KB`})`;
+    const link = $("#dl-sheet-save");
+    link.href = sheetUrl;
+    link.download = name;
+    link.hidden = IN_APP && canShare;
+    const share = $("#dl-sheet-share");
+    share.hidden = !canShare;
+    share.onclick = async () => {
+      try { await navigator.share({ files: [file], title: name }); closeSheet(); } catch (err) { if (err.name !== "AbortError") toast("공유하지 못했습니다. ‘받기’를 눌러 보세요.", 4000); }
+    };
+    $("#dl-sheet-note").hidden = !IN_APP;
+    sheet.hidden = false;
   };
   const haText = (ha) => (ha >= 100 ? `${fmt(ha / 100, 2)} ㎢` : `${fmt(ha, 2)} ha`);
   const layerOf = (a) => S.layers[a.li];
@@ -481,6 +515,9 @@
     if (name === "download") renderDownload();
     if (name === "about") renderAbout();
   };
+
+  $("#dl-sheet-close").onclick = closeSheet;
+  $("#dl-sheet-save").addEventListener("click", () => setTimeout(closeSheet, 1500));
 
   // 사업지 분석(js/analyze.js)이 쓰는 공용 자료와 도구
   window.Portal = { S, STACK, $, $$, esc, fmt, debounce, toast, saveBlob, haText, layerOf, typeBadge, loadScript, loadJSZip, areaGeo, popupHtml };
