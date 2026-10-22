@@ -119,6 +119,7 @@ def heritage_hint(alias, remark):
 
 
 SPECIAL_OK = None   # KDPA 야생생물특별보호구역(지정 현황) — 브이월드의 ‘특별보호구역’ 표기가 맞는지 볼 때 씀(main에서 채움)
+WET_KIND = None     # (KDPA 연안습지 도형, KDPA 내륙습지 도형) — 브이월드 습지보호구역 레이어에서 연안만 고를 때 씀(main에서 채움)
 
 
 def prepare(layer, gdf):
@@ -131,6 +132,16 @@ def prepare(layer, gdf):
         if SPECIAL_OK is not None:
             wrong = (gdf["uname"] == "야생생물특별보호구역") & ~gdf.geometry.intersects(SPECIAL_OK)
             gdf.loc[wrong, "uname"] = "야생생물보호구역"
+    if layer["id"] == "wetland-coast" and "name" in gdf.columns:
+        # 이 레이어에는 우포늪·한강하구 같은 내륙 습지보호지역도 들어 있음 — KDPA에서 더 많이 겹치는 쪽(갯벌·시도 연안 / 내륙)으로 가름
+        coast, inland = WET_KIND or (None, None)
+        keep = {}
+        for nm, g in gdf.groupby("name"):
+            geom = shapely.union_all(shapely.make_valid(g.geometry.values))
+            a_c = geom.intersection(coast).area if coast is not None else 0
+            a_i = geom.intersection(inland).area if inland is not None else 0
+            keep[nm] = a_c > a_i if (a_c or a_i) else "갯벌" in str(nm)
+        gdf = gdf[gdf["name"].map(keep).fillna(False).astype(bool)].copy()
     if layer["id"] == "marine-mpa":
         # 예: mpa_nam '보령소황사구해역 해양보호구역(경관)', gos_num '해양수산부고시제2018-135호', gos_dat '20181130', loc '충청남도 보령시 …'
         gdf["name"] = gdf["mpa_nam"].map(clean)
@@ -500,9 +511,12 @@ def main():
     REL.mkdir(parents=True)
 
     kd = load_kdpa()
-    global SPECIAL_OK
+    global SPECIAL_OK, WET_KIND
     if kd is not None and (kd["DESIG"] == "야생생물특별보호구역").any():
         SPECIAL_OK = shapely.union_all(kd[kd["DESIG"] == "야생생물특별보호구역"].geometry.values)
+    if kd is not None:
+        u = lambda ds: shapely.union_all(kd[kd["DESIG"].isin(ds)].geometry.values)  # noqa: E731
+        WET_KIND = (u(["습지보호지역-갯벌", "습지보호지역-시도"]), u(["습지보호지역", "시_도습지보호지역"]))
     ez, ez_meta = load_ecozone()
     admin = load_admin()
     layers_out, areas_out, gpkg_frames = [], [], []
