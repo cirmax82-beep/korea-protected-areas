@@ -132,6 +132,8 @@ def prepare(layer, gdf):
         if SPECIAL_OK is not None:
             wrong = (gdf["uname"] == "야생생물특별보호구역") & ~gdf.geometry.intersects(SPECIAL_OK)
             gdf.loc[wrong, "uname"] = "야생생물보호구역"
+    if layer["id"] == "forest-genetic" and "uname" in gdf.columns:   # 사용자가 쓰는 이름(산림유전자원보호림)으로
+        gdf["uname"] = gdf["uname"].map(lambda u: "산림유전자원보호림" if clean(u) == "산림유전자원보호구역" else u)
     if layer["id"] == "wetland-coast" and "name" in gdf.columns:
         # 이 레이어에는 우포늪·한강하구 같은 내륙 습지보호지역도 들어 있음 — KDPA에서 더 많이 겹치는 쪽(갯벌·시도 연안 / 내륙)으로 가름
         coast, inland = WET_KIND or (None, None)
