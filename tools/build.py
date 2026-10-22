@@ -118,12 +118,19 @@ def heritage_hint(alias, remark):
     return ""
 
 
+SPECIAL_OK = None   # KDPA 야생생물특별보호구역(지정 현황) — 브이월드의 ‘특별보호구역’ 표기가 맞는지 볼 때 씀(main에서 채움)
+
+
 def prepare(layer, gdf):
     """레이어마다 다른 속성을 공통 이름(name·uname·sido_name·sigg_name·notice·remark)으로 맞춤"""
     if layer["id"] in ("wildlife", "wildlife-special") and "uname" in gdf.columns:   # 옛 이름(야생동·식물) → 지금 법률 용어(야생생물)
         gdf["uname"] = gdf["uname"].map(lambda u: {"야생동·식물보호구역": "야생생물보호구역", "시·도야생동·식물보호구역": "시·도 야생생물보호구역",
                                                    "야생동·식물특별보호구역": "야생생물특별보호구역",
                                                    "야생동·식물보호구역미분류": "야생생물보호구역(미분류)"}.get(clean(u), u))
+        # 지자체가 일반 보호구역을 ‘특별보호구역’으로 잘못 입력한 경우가 있어, 지정 현황(KDPA 특별보호구역)과 겹치지 않으면 보호구역으로
+        if SPECIAL_OK is not None:
+            wrong = (gdf["uname"] == "야생생물특별보호구역") & ~gdf.geometry.intersects(SPECIAL_OK)
+            gdf.loc[wrong, "uname"] = "야생생물보호구역"
     if layer["id"] == "marine-mpa":
         # 예: mpa_nam '보령소황사구해역 해양보호구역(경관)', gos_num '해양수산부고시제2018-135호', gos_dat '20181130', loc '충청남도 보령시 …'
         gdf["name"] = gdf["mpa_nam"].map(clean)
@@ -440,6 +447,28 @@ def vworld_rest(groups, eco):
     return out, dropped
 
 
+def merge_by_kdpa(layer, groups, kd):
+    """같은 KDPA 보호지역에 걸친 브이월드 구역(예: 진양호 특별보호구역의 진주시·사천시 조각)을 한 구역으로 합치고 KDPA 이름을 붙임"""
+    if kd is None or not groups:
+        return groups
+    merged, used = [], set()
+    for _, r in kd[kd["DESIG"].isin(layer.get("kdpa", []))].iterrows():
+        hit = [i for i, (_, g, _, _) in enumerate(groups) if i not in used and g.intersects(r.geometry)]
+        if not hit:
+            continue
+        used |= set(hit)
+        parts = [groups[i] for i in hit]
+        siggs = sorted({k.get("sigg_name") for k, _, _, _ in parts if k.get("sigg_name")})
+        sidos = sorted({k.get("sido_name") for k, _, _, _ in parts if k.get("sido_name")})
+        notice = max((notice_text(k.get("dyear"), k.get("dnum")) for k, _, _, _ in parts), key=len, default="")   # 번호까지 있는 고시를 씀
+        name, _ = kdpa_name(r, r["DESIG"], KDPA_LABEL.get(r["DESIG"], r["DESIG"]))
+        merged.append(({"merge": str(r["WDPAID"])}, shapely.union_all([g for _, g, _, _ in parts]),
+                       [f"{'·'.join(siggs)}에 걸침"] if len(siggs) > 1 else [],
+                       {"name": name, "uname": parts[0][0].get("uname", ""), "notice": notice,
+                        "sido_name": sidos[0] if len(sidos) == 1 else "", "sigg_name": siggs[0] if len(siggs) == 1 else ""}))
+    return merged + [x for i, x in enumerate(groups) if i not in used]
+
+
 def area_name(layer, key, remarks):
     if "park_name" in key:
         return f"{key['park_name'] or '이름 미상'} {layer['name']}"
@@ -471,6 +500,9 @@ def main():
     REL.mkdir(parents=True)
 
     kd = load_kdpa()
+    global SPECIAL_OK
+    if kd is not None and (kd["DESIG"] == "야생생물특별보호구역").any():
+        SPECIAL_OK = shapely.union_all(kd[kd["DESIG"] == "야생생물특별보호구역"].geometry.values)
     ez, ez_meta = load_ecozone()
     admin = load_admin()
     layers_out, areas_out, gpkg_frames = [], [], []
@@ -487,6 +519,8 @@ def main():
                 n_parts = len(gdf)
                 groups = group_areas(layer, gdf.set_crs(4326, allow_override=True))
                 groups, vdrop = vworld_rest(groups, eco)
+                if layer.get("merge_kdpa"):
+                    groups = merge_by_kdpa(layer, groups, kd)
         # carve_by 레이어(예: 야생생물특별보호구역)가 차지한 자리는 이 레이어에서 잘라 냄
         cut = [(None, g, None, None) for lid in layer.get("carve_by", []) for g in done_geoms.get(lid, [])]
         if cut:

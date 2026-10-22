@@ -25,7 +25,8 @@ LAYERS = [
     # 자연·생태 보호구역
     # 브이월드 야생생물보호구역 자료 중 특별보호구역만 따로(진양호 수달서식지 등)
     {"id": "wildlife-special", "data": "LT_C_UM221", "raw": "wildlife", "name": "야생생물특별보호구역", "group": "nature", "color": "#8f1d1d",
-     "law": "야생생물 보호 및 관리에 관한 법률 제27조", "keep": ["야생생물특별보호구역"], "kdpa": ["야생생물특별보호구역"]},
+     "law": "야생생물 보호 및 관리에 관한 법률 제27조", "keep": ["야생생물특별보호구역"], "kdpa": ["야생생물특별보호구역"],
+     "merge_kdpa": True},   # 지정 현황(KDPA)과 겹치는 것만 특별보호구역으로 보고(build.py SPECIAL_OK), 같은 보호지역 조각은 한 구역으로
     {"id": "wildlife", "data": "LT_C_UM221", "ecozone": "야생동식물", "name": "야생생물보호구역", "group": "nature", "color": "#c92a2a",
      "law": "야생생물 보호 및 관리에 관한 법률 제33조", "keep": ["야생생물보호구역", "시·도 야생생물보호구역", "야생생물보호구역(미분류)"],
      "carve_by": ["wildlife-special"], "kdpa": ["야생생물보호구역"]},
