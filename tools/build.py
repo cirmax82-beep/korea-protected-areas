@@ -296,10 +296,27 @@ def kdpa_name(r, desig, label):
     return (base if NAME_END.search(base.replace(" ", "")) else f"{base} {label}"), detail
 
 
+def uncovered_part(geom, tree, vw_geoms):
+    """KDPA 구역에서 다른 자료(브이월드·생태·자연도)가 덮지 못한 부분. 경계를 달리 그려 생기는 폭 40 m 안쪽 띠는 버리고,
+    남은 부분이 구역의 10% 넘고 1 ha 넘을 때만 돌려줌(아니면 None)"""
+    hit = [vw_geoms[i] for i in tree.query(geom, predicate="intersects")]
+    if not hit:
+        return geom
+    rest = shapely.make_valid(geom.difference(shapely.union_all(shapely.make_valid(hit))))
+    rest = shapely.make_valid(rest.buffer(-0.0002).buffer(0.0002).intersection(geom))   # 약 20 m 열고 닫기
+    rest = polygonal(rest)
+    if rest is None or rest.is_empty or not geom.area:
+        return None
+    ha = gpd.GeoSeries([rest], crs=4326).to_crs(5179).area.iloc[0] / 1e4
+    return rest if rest.area / geom.area > 0.1 and ha > 1 else None
+
+
 def kdpa_groups(layer, kd, vw_geoms, vw_names=()):
     """KDPA 구역 → group_areas와 같은 꼴(브이월드 우선).
     같은 종류의 브이월드 구역이 있으면 ① 절반 넘게 겹치거나 ② 고유 이름이 같은 브이월드 구역과 조금이라도 겹치거나
-    ③ 이름 없이 전국을 한 조각으로 묶은 옛 자료(예: 2009년 ‘경관보호구역’)이면 이미 있는 것으로 보고 뺌."""
+    ③ 이름 없이 전국을 한 조각으로 묶은 옛 자료(예: 2009년 ‘경관보호구역’)이면 이미 있는 것으로 봄.
+    다만 ①·②라도 다른 자료가 덮지 못한 부분이 넓으면(예: 양산 하북면 1 야생생물보호구역은 브이월드 양산시 구역과 절반만 겹침,
+    고창·무안 갯벌은 브이월드 연안습지가 일부만 덮음) 그 부분만 KDPA 이름으로 넣음 — 겹친 부분은 그대로 두어 두 번 칠하지 않음."""
     pick = layer.get("kdpa_pick")   # {지정 유형: [이름, …]} — 새로 지정돼 다른 자료에 아직 없는 구역만 골라 넣을 때
     if kd is None or not (layer.get("kdpa") or pick):
         return [], 0
@@ -311,20 +328,27 @@ def kdpa_groups(layer, kd, vw_geoms, vw_names=()):
     part = part[part.geometry.notna() & ~part.geometry.is_empty & (shapely.area(part.geometry.values) > 0)]
     share = covered_share(list(part.geometry), vw_geoms)
     vw_cores = {c for c in map(core_name, vw_names) if len(c) >= 2}
+    tree = shapely.STRtree(vw_geoms) if vw_geoms else None
     out, dup = [], 0
     for (_, r), s in zip(part.iterrows(), share):
         geom = r.geometry
         desig = r["DESIG"]
         label = KDPA_LABEL.get(desig, desig)
         core = core_name(re.sub(r"^\d+_", "", clean(r["ORIG_NAME"])))
+        rest_of = None
         if vw_geoms and (s >= 0.5 or (s > 0 and core in vw_cores) or not core):
-            dup += 1   # 골라 넣은 구역도 브이월드 등에 들어오면 여기서 자동으로 빠짐
-            continue
+            rest = uncovered_part(geom, tree, vw_geoms) if core else None
+            if rest is None:
+                dup += 1   # 골라 넣은 구역도 브이월드 등에 들어오면 여기서 자동으로 빠짐
+                continue
+            rest_of = gpd.GeoSeries([geom], crs=4326).to_crs(5179).area.iloc[0] / 1e4
+            geom = rest
         name, detail = kdpa_name(r, desig, label)
         codes = [c for c in re.split(r"[;,]", str(r.get("SUB_LOC") or "")) if c]
         sido = KDPA_SIDO.get(codes[0], "") if len(codes) == 1 else ""
         yr = r.get("STATUS_YR")
         remarks = [x for x in (
+            f"다른 자료(브이월드·생태·자연도)에 없는 부분만 — KDPA 전체 {rest_of:,.0f} ha" if rest_of else "",
             detail[:80],
             "관리 " + next((ko for en, ko in KDPA_AUTH if clean(r.get("MANG_AUTH")).lower().startswith(en.lower())), clean(r.get("MANG_AUTH")))
             if clean(r.get("MANG_AUTH")) else "",
