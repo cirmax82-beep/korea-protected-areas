@@ -18,6 +18,7 @@
 """
 import hashlib
 import json
+import math
 import re
 import shutil
 import sys
@@ -27,6 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import geopandas as gpd
+from shapely import affinity
 import numpy as np
 import pandas as pd
 import shapely
@@ -296,9 +298,9 @@ def kdpa_name(r, desig, label):
     return (base if NAME_END.search(base.replace(" ", "")) else f"{base} {label}"), detail
 
 
-def uncovered_part(geom, tree, vw_geoms):
+def uncovered_part(geom, tree, vw_geoms, whole=None):
     """KDPA 구역에서 다른 자료(브이월드·생태·자연도)가 덮지 못한 부분. 경계를 달리 그려 생기는 폭 40 m 안쪽 띠는 버리고,
-    남은 부분이 구역의 10% 넘고 1 ha 넘을 때만 돌려줌(아니면 None)"""
+    남은 부분이 구역(whole: 위치만 옮겨 있는 조각을 빼기 전 KDPA 구역 전체)의 10% 넘고 1 ha 넘을 때만 돌려줌(아니면 None)"""
     hit = [vw_geoms[i] for i in tree.query(geom, predicate="intersects")]
     if not hit:
         return geom
@@ -308,15 +310,84 @@ def uncovered_part(geom, tree, vw_geoms):
     if rest is None or rest.is_empty or not geom.area:
         return None
     ha = gpd.GeoSeries([rest], crs=4326).to_crs(5179).area.iloc[0] / 1e4
-    return rest if rest.area / geom.area > 0.1 and ha > 1 else None
+    return rest if rest.area / (whole if whole is not None else geom).area > 0.1 and ha > 1 else None
 
 
-def kdpa_groups(layer, kd, vw_geoms, vw_names=()):
+def shifted_twin(geom, tree, vw_geoms, reach=0.01):
+    """KDPA 구역이 다른 자료(브이월드·생태·자연도)의 같은 구역을 위치만 옮겨 그린 것인지 봄(예: 경북 KDPA 야생생물보호구역 다수가
+    브이월드보다 약 380 m 옮겨져 있어 같은 구역이 두 번 그려짐 — 구미 남통동 등). 1 km 안에서 한 번 옮겨(조각 하나와 넓이가 비슷한
+    짝의 무게중심 차) 조각의 60% 넘게 다른 자료 조각에 덮이면 그 조각은 짝이 있는 것. 30 m 넘게 옮겨야 맞고 짝 있는 조각이 구역의
+    절반 넘으면 짝 없는 조각만 돌려줌(모두 짝이 있으면 빈 도형). 그 밖(제자리 겹침은 아래 겹침 규칙이 다룸)은 geom 그대로"""
+    try:
+        parts = [q for q in getattr(geom, "geoms", [geom]) if q.area > 0]   # 섞여 든 선·점은 뺌
+        if not geom.area or not parts:
+            return geom
+        cps = [kp for i in tree.query(geom.buffer(reach), predicate="intersects") for kp in getattr(vw_geoms[i], "geoms", [vw_geoms[i]])]
+        cps = [kp for kp in cps if kp.area <= 2 * geom.area]   # 시군을 한 조각으로 묶은 큰 구역은 짝 후보가 아님
+        if not cps:
+            return geom
+        ctree = shapely.STRtree(cps)
+        best, best_left, best_shift, tried = 0.0, None, 0.0, set()
+        for p in sorted(parts, key=lambda x: -x.area)[:5]:
+            pc = p.centroid
+            for kp in cps:
+                if not 0.8 <= kp.area / p.area <= 1.25:
+                    continue
+                dx, dy = kp.centroid.x - pc.x, kp.centroid.y - pc.y
+                if dx * dx + dy * dy > reach * reach or (round(dx, 5), round(dy, 5)) in tried:
+                    continue
+                tried.add((round(dx, 5), round(dy, 5)))
+                matched, left = 0.0, []
+                for q in parts:
+                    t = affinity.translate(q, dx, dy)
+                    hit = [cps[j] for j in ctree.query(t, predicate="intersects")]
+                    if hit and shapely.union_all(hit).intersection(t).area / q.area >= 0.6:
+                        matched += q.area
+                    else:
+                        left.append(q)
+                if matched > best:
+                    best, best_left, best_shift = matched, left, math.hypot(dx * 88800, dy * 111000)
+        if best / geom.area <= 0.5 or best_shift < 30:
+            return geom
+        return shapely.union_all(best_left) if best_left else shapely.Polygon()
+    except shapely.errors.GEOSException:
+        return geom
+
+
+def sigg_area(geoms, admin, atree):
+    """시군구 번호(admin 행) → 그 안에 든 구역 넓이(ha, 위도로 어림)"""
+    out = {}
+    for g in geoms:
+        k = 111320 * 111320 * math.cos(math.radians(g.centroid.y)) / 1e4
+        for j in atree.query(g, predicate="intersects"):
+            try:
+                a = shapely.intersection(g, admin.geometry.values[j]).area * k
+            except shapely.errors.GEOSException:
+                continue
+            out[int(j)] = out.get(int(j), 0) + a
+    return out
+
+
+def main_sigg(geom, admin, atree):
+    """구역 안에 흩은 점이 가장 많이 든 시군구 번호(없으면 None)"""
+    pts = sample_points(geom, 120)
+    if not len(pts):
+        return None
+    idx = atree.query(shapely.points(pts), predicate="within")[1]
+    return int(np.bincount(idx).argmax()) if len(idx) else None
+
+
+def kdpa_groups(layer, kd, vw_geoms, vw_names=(), base=(), admin=None):
     """KDPA 구역 → group_areas와 같은 꼴(브이월드 우선).
     같은 종류의 브이월드 구역이 있으면 ① 절반 넘게 겹치거나 ② 고유 이름이 같은 브이월드 구역과 조금이라도 겹치거나
     ③ 이름 없이 전국을 한 조각으로 묶은 옛 자료(예: 2009년 ‘경관보호구역’)이면 이미 있는 것으로 봄.
     다만 ①·②라도 다른 자료가 덮지 못한 부분이 넓으면(예: 양산 하북면 1 야생생물보호구역은 브이월드 양산시 구역과 절반만 겹침,
-    고창·무안 갯벌은 브이월드 연안습지가 일부만 덮음) 그 부분만 KDPA 이름으로 넣음 — 겹친 부분은 그대로 두어 두 번 칠하지 않음."""
+    고창·무안 갯벌은 브이월드 연안습지가 일부만 덮음) 그 부분만 KDPA 이름으로 넣음 — 겹친 부분은 그대로 두어 두 번 칠하지 않음.
+    같은 모양·넓이의 구역이 다른 자료에 위치만 옮겨져 있으면(shifted_twin) 다른 자료(브이월드 등)를 기준으로 보고 KDPA 쪽은 뺌.
+    kdpa_fill: "sigg"인 종류(야생생물보호구역)는 브이월드·생태·자연도(base)에 구역이 있는(5 ha 넘게 든 — 이웃 시군 구역의 경계 자투리는
+    빼고) 시군구에서는 KDPA를 하나도 넣지 않고,
+    그 자료에 없는 시군구(예: 경남 합천·밀양)만 KDPA로 채움 — 2025.12 경남 지정 현황과 견주면 브이월드가 있는 시군은 브이월드가
+    맞고(양산 4곳 1,177 ha ↔ 브이월드 1,156 ha, KDPA 3,149 ha), KDPA는 기간 만료(창원)나 옛 경계가 섞여 있음."""
     pick = layer.get("kdpa_pick")   # {지정 유형: [이름, …]} — 새로 지정돼 다른 자료에 아직 없는 구역만 골라 넣을 때
     if kd is None or not (layer.get("kdpa") or pick):
         return [], 0
@@ -329,26 +400,45 @@ def kdpa_groups(layer, kd, vw_geoms, vw_names=()):
     share = covered_share(list(part.geometry), vw_geoms)
     vw_cores = {c for c in map(core_name, vw_names) if len(c) >= 2}
     tree = shapely.STRtree(vw_geoms) if vw_geoms else None
-    out, dup = [], 0
+    out, dup, twins, by_sigg = [], 0, [], []
+    fill_sigg = layer.get("kdpa_fill") == "sigg" and admin is not None and len(base)
+    if fill_sigg:
+        atree = shapely.STRtree(admin.geometry.values)
+        have = {j for j, a in sigg_area(base, admin, atree).items() if a >= 5}
     for (_, r), s in zip(part.iterrows(), share):
         geom = r.geometry
         desig = r["DESIG"]
         label = KDPA_LABEL.get(desig, desig)
         core = core_name(re.sub(r"^\d+_", "", clean(r["ORIG_NAME"])))
-        rest_of = None
+        rest_of = moved_of = None
+        if tree is not None:
+            left = shifted_twin(geom, tree, vw_geoms)
+            if left is not geom:
+                if left.is_empty:
+                    dup += 1
+                    twins.append(clean(r["ORIG_NAME"])[:30])
+                    continue
+                moved_of = gpd.GeoSeries([geom], crs=4326).to_crs(5179).area.iloc[0] / 1e4
+                geom = left
+                s = 1.0   # 짝 없는 조각도 아래 겹침 규칙(uncovered_part)으로 — 다른 자료가 덮지 못한 부분만 넣음
+        if fill_sigg and main_sigg(geom, admin, atree) in have:
+            dup += 1
+            by_sigg.append(clean(r["ORIG_NAME"])[:30])
+            continue
         if vw_geoms and (s >= 0.5 or (s > 0 and core in vw_cores) or not core):
-            rest = uncovered_part(geom, tree, vw_geoms) if core else None
+            rest = uncovered_part(geom, tree, vw_geoms, whole=r.geometry) if core else None
             if rest is None:
                 dup += 1   # 골라 넣은 구역도 브이월드 등에 들어오면 여기서 자동으로 빠짐
                 continue
-            rest_of = gpd.GeoSeries([geom], crs=4326).to_crs(5179).area.iloc[0] / 1e4
+            rest_of = moved_of or gpd.GeoSeries([geom], crs=4326).to_crs(5179).area.iloc[0] / 1e4
             geom = rest
         name, detail = kdpa_name(r, desig, label)
         codes = [c for c in re.split(r"[;,]", str(r.get("SUB_LOC") or "")) if c]
         sido = KDPA_SIDO.get(codes[0], "") if len(codes) == 1 else ""
         yr = r.get("STATUS_YR")
         remarks = [x for x in (
-            f"다른 자료(브이월드·생태·자연도)에 없는 부분만 — KDPA 전체 {rest_of:,.0f} ha" if rest_of else "",
+            f"다른 자료(브이월드·생태·자연도)에 없는 부분만 — KDPA 전체 {rest_of:,.0f} ha" if rest_of else
+            f"다른 자료에 위치만 옮겨 있는 조각은 뺌 — KDPA 전체 {moved_of:,.0f} ha" if moved_of else "",
             detail[:80],
             "관리 " + next((ko for en, ko in KDPA_AUTH if clean(r.get("MANG_AUTH")).lower().startswith(en.lower())), clean(r.get("MANG_AUTH")))
             if clean(r.get("MANG_AUTH")) else "",
@@ -361,6 +451,10 @@ def kdpa_groups(layer, kd, vw_geoms, vw_names=()):
         extra = {"name": name, "uname": label, "sido_name": sido, "sigg_name": "",
                  "notice": f"{int(yr)}년 지정" if pd.notna(yr) and yr else "", "source": KDPA_SOURCE, "src": "k"}
         out.append((key, geom, remarks, extra))
+    if twins:
+        print(f"    {layer.get('name', layer['id'])}: KDPA 중 다른 자료에 위치만 옮겨 있는 구역 {len(twins)}곳 뺌 — {', '.join(twins[:60])}")
+    if by_sigg:
+        print(f"    {layer.get('name', layer['id'])}: 브이월드·생태·자연도에 구역이 있는 시군구라 뺀 KDPA {len(by_sigg)}곳 — {', '.join(by_sigg[:80])}")
     return out, dup
 
 
@@ -570,7 +664,8 @@ def main():
         # 3) KDPA — 위 두 자료에 없는 구역(같은 종류도 보충)
         known = [(g, extra.get("name") or area_name(layer, key, remarks)) for key, g, remarks, extra in eco + groups if not g.is_empty]
         known += [(g, "") for _, g, _, _ in cut]   # 잘라 낸 자리(다른 레이어)에 겹치는 KDPA 구역도 넣지 않음
-        kgroups, kdup = kdpa_groups(layer, kd, [g for g, _ in known], [n for _, n in known])
+        kgroups, kdup = kdpa_groups(layer, kd, [g for g, _ in known], [n for _, n in known],
+                                    base=[g for _, g, _, _ in eco + groups if not g.is_empty], admin=admin)
         if not eco and not groups and not kgroups:
             print(f"  {layer['name']}: 자료 없음 — 건너뜀")
             continue
@@ -585,6 +680,8 @@ def main():
             if extra.get("rest"):
                 name = f"{name} (일부)"
             area_ha = round(gpd.GeoSeries([geom], crs=4326).to_crs(5179).area.iloc[0] / 1e4, 2)
+            if extra.get("src") == "k" and area_ha < 1 and any("없는 부분만" in x for x in remarks):
+                continue   # KDPA 남은 부분이 뒤 단계(잘라 내기 등)에서 1 ha 안 되는 자투리만 남은 것
             minx, miny, maxx, maxy = (round(v, 5) for v in geom.bounds)
             got = {k: key.get(k) or extra.get(k, "") for k in ("uname", "sido_name", "sigg_name")}
             notice = notice_text(key.get("dyear"), key.get("dnum")) or extra.get("notice", "")

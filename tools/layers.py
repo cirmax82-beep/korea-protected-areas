@@ -29,7 +29,8 @@ LAYERS = [
      "merge_kdpa": True},   # 지정 현황(KDPA)과 겹치는 것만 특별보호구역으로 보고(build.py SPECIAL_OK), 같은 보호지역 조각은 한 구역으로
     {"id": "wildlife", "data": "LT_C_UM221", "ecozone": "야생동식물", "name": "야생생물보호구역", "group": "nature", "color": "#c92a2a",
      "law": "야생생물 보호 및 관리에 관한 법률 제33조", "keep": ["야생생물보호구역", "시·도 야생생물보호구역", "야생생물보호구역(미분류)"],
-     "carve_by": ["wildlife-special"], "kdpa": ["야생생물보호구역"]},
+     "carve_by": ["wildlife-special"], "kdpa": ["야생생물보호구역"],
+     "kdpa_fill": "sigg"},   # 브이월드·생태·자연도에 구역이 있는 시군구는 그 자료만(브이월드 기준), 없는 시군구만 KDPA로(build.py kdpa_groups)
     # 브이월드 ‘습지보호구역’(LT_C_WGISARWET)에는 내륙 습지보호지역도 함께 들어 있어, KDPA 구분으로 갯벌(연안)만 남김(build.py prepare)
     {"id": "wetland-coast", "data": "LT_C_WGISARWET", "name": "연안습지보호지역", "group": "nature", "color": "#1971c2",
      "law": "습지보전법 제8조(해양수산부)", "kdpa": ["습지보호지역-갯벌", "습지보호지역-시도"]},
